@@ -140,6 +140,48 @@ class MainActivity : Activity() {
         })();
     """.trimIndent()
 
+    /** 隐藏 WorkBuddy 平台外壳渲染的「回WorkBuddy继续聊」浮窗按钮（v1.3）。
+       该浮窗不在我们业务页 HTML 内，是平台客户端注入的 chrome，只能原生注入 JS 隐藏。
+       平台按钮可能异步渲染，故轮询 + MutationObserver 双保险。 */
+    private val HIDE_FAB_JS = """
+        (function(){
+          function hideEl(el){ if(el){ el.style.display='none'; el.style.visibility='hidden'; } }
+          function hideWbFab(){
+            try{
+              var nodes = document.querySelectorAll('a,button,div,span');
+              for(var i=0;i<nodes.length;i++){
+                var el = nodes[i];
+                var txt = (el.innerText||el.textContent||'').trim();
+                if(txt && (txt.indexOf('回WorkBuddy')>=0 || txt.indexOf('继续聊')>=0)){
+                  hideEl(el);
+                  var p = el;
+                  while(p && p !== document.body){
+                    if(p.tagName === 'A' || p.tagName === 'BUTTON'){ hideEl(p); break; }
+                    p = p.parentElement;
+                  }
+                }
+                var cls = (el.className||'').toString();
+                if(/workbuddy|wk-fab|chat-float|float-chat|back-to|continue-chat|floating-btn|fab-btn/i.test(cls)){
+                  hideEl(el);
+                }
+              }
+              var links = document.querySelectorAll('a[href*="workbuddy"]');
+              for(var j=0;j<links.length;j++){
+                var l = links[j]; var lt = (l.innerText||'').trim();
+                if(lt.indexOf('WorkBuddy')>=0 || lt.indexOf('继续聊')>=0){ hideEl(l); }
+              }
+            }catch(e){}
+          }
+          hideWbFab();
+          setTimeout(hideWbFab, 600);
+          setTimeout(hideWbFab, 1500);
+          setTimeout(hideWbFab, 3000);
+          if(window.MutationObserver){
+            try{ new MutationObserver(function(){ hideWbFab(); }).observe(document.body, {childList:true, subtree:true}); }catch(e){}
+          }
+        })();
+    """.trimIndent()
+
     /** JS 桥接：接收页面上报的「是否在顶部」 */
     inner class WbScrollBridge {
         @JavascriptInterface
@@ -255,6 +297,8 @@ class MainActivity : Activity() {
                 if (isBizPage(url)) {
                     webView.evaluateJavascript(SCROLL_JS, null)
                 }
+                // v1.3：隐藏平台「回WorkBuddy继续聊」浮窗（外壳页与业务页都注入，双保险）
+                webView.evaluateJavascript(HIDE_FAB_JS, null)
             }
 
             // 主框架加载失败才弹错误页；子资源（图片等）失败忽略，避免误伤
@@ -359,9 +403,14 @@ class MainActivity : Activity() {
     private fun setupSwipe() {
         swipe.setColorSchemeColors(getColorCompat(R.color.colorPrimary))
         swipe.setOnRefreshListener {
-            webView.reload()
-            // 兜底：若页面已完成回调未触发（极少见），4 秒后强制收起
-            mainHandler.postDelayed({ swipe.isRefreshing = false }, 4000)
+            // v1.3：软刷新当前视图，而不是 webView.reload()（reload 会重载外壳页 → 重新鉴权 → 跳登录页）。
+            // 业务页暴露了 window.__wlzSoftRefresh；降级到 location.reload(true) 仅当钩子缺失（旧版业务页）。
+            webView.evaluateJavascript(
+                "if(window.__wlzSoftRefresh){window.__wlzSoftRefresh();}else{location.reload(true);}",
+                null
+            )
+            // 兜底：若页面已完成回调未触发（极少见），1.5 秒后强制收起
+            mainHandler.postDelayed({ swipe.isRefreshing = false }, 1500)
         }
         // 关键修复：只有业务页处于「最顶部」时才允许下拉刷新。
         // 由 JS 桥接实时上报 pageAtTop（含内层滚动容器；webView.scrollY 只反映

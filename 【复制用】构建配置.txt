@@ -1,0 +1,48 @@
+# 下面这些内容，是给 GitHub 自动打包用的配置文件。
+# 教程第 3 步会让你把它粘到 GitHub 网页上（文件名要填 .github/workflows/build-apk.yml）
+# 复制范围：从 "name:" 开始，到文件末尾，全部复制。
+# ---------------------------------------------------------------------------
+
+name: 构建安卓 APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 安装 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 Gradle 8.2
+        run: |
+          curl -sL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.2-bin.zip
+          sudo unzip -q /tmp/gradle.zip -d /opt
+          echo "/opt/gradle-8.2/bin" >> $GITHUB_PATH
+
+      - name: 生成 Gradle Wrapper（仓库里未附带二进制 jar，这里现场生成）
+        run: gradle wrapper --gradle-version 8.2 --distribution-type bin --no-daemon
+
+      - name: 构建 Debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: 上传 APK 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: wanlongzhou-supply-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30

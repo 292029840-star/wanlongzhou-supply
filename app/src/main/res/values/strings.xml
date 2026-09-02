@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">万龙洲供应链</string>
+    <!-- 线上系统地址（真正生效的默认值在 MainActivity.kt 的 DEFAULT_URL） -->
+    <string name="default_url">https://www.workbuddy.link/p/1n4Jb5OioGpFwab2YHFXTs</string>
+
+    <!-- 闪屏 -->
+    <string name="splash_title">万龙洲供应链申购系统</string>
+    <string name="splash_sub">正在加载…</string>
+
+    <!-- 断网提示 -->
+    <string name="net_error_icon">📶</string>
+    <string name="net_error_msg">网络连接失败\n请检查网络后重试</string>
+    <string name="retry">重新加载</string>
+
+    <!-- 菜单 -->
+    <string name="menu_refresh">刷新（清缓存）</string>
+    <string name="menu_set_url">设置服务器地址</string>
+    <string name="menu_reset_url">恢复默认地址</string>
+    <string name="menu_print">打印当前页面（A4）</string>
+    <string name="menu_check_update">检查页面更新</string>
+    <string name="menu_clear_cache">清除本地页面缓存</string>
+    <string name="print_job_name">万龙洲供应链单据</string>
+</resources>

@@ -27,6 +27,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.webkit.JavascriptInterface
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
@@ -57,6 +58,10 @@ import java.net.URL
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
+
+    /** 业务页当前是否处于顶部（由页面 JS 实时上报，含内层滚动容器）；
+     *  SwipeRefreshLayout 据此判断是否允许下拉刷新。 */
+    private var pageAtTop = true
     private lateinit var progress: ProgressBar
     private lateinit var swipe: SwipeRefreshLayout
     private lateinit var splash: View
@@ -116,6 +121,33 @@ class MainActivity : Activity() {
     private fun getColorCompat(id: Int): Int =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) getColor(id) else resources.getColor(id)
 
+    /** 注入到业务页的滚动探测脚本：监听（含捕获阶段）所有 scroll 事件，
+     *  同时读 window.scrollY（文档滚动）和事件目标 scrollTop（内层容器滚动），
+     *  实时上报「是否在顶部」给原生，供 SwipeRefreshLayout 判断是否允许刷新。
+     *  关键：webView.scrollY 只反映文档滚动，页面在内层 div 滚动时恒为 0，
+     *  会误判「在顶部」导致翻页/滚动中误触刷新——这里用真实滚动位置根治。 */
+    private val SCROLL_JS = """
+        (function(){
+          function report(e){
+            var top = (window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0);
+            var inner = 0;
+            if (e && e.target && e.target !== window && e.target !== document && e.target.scrollTop != null) inner = e.target.scrollTop;
+            var atTop = (top <= 0 && inner <= 0) ? 1 : 0;
+            if (window.__wbScroll) window.__wbScroll.atTop(atTop);
+          }
+          window.addEventListener('scroll', function(e){ report(e); }, true);
+          report(null);
+        })();
+    """.trimIndent()
+
+    /** JS 桥接：接收页面上报的「是否在顶部」 */
+    inner class WbScrollBridge {
+        @JavascriptInterface
+        fun atTop(v: Int) {
+            pageAtTop = v == 1
+        }
+    }
+
     /** 主地址带时间戳加载，确保每次拿到最新外壳页（业务页走本地缓存，见拦截逻辑） */
     private fun loadHome() {
         val url = homeUrl
@@ -162,6 +194,9 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
         }
+
+        // JS 桥接：页面据此上报真实滚动位置，供下拉刷新判断是否处于顶部
+        webView.addJavascriptInterface(WbScrollBridge(), "__wbScroll")
 
         webView.webViewClient = object : WebViewClient() {
 
@@ -216,6 +251,10 @@ class MainActivity : Activity() {
                 splash.postDelayed({ splash.visibility = View.GONE }, 250)
                 // 每次加载完顺带检查一次更新（异步，不阻塞）
                 checkUpdateAsync(notify = false)
+                // 业务页注入滚动探测脚本（仅在业务页，避免污染外壳页）
+                if (isBizPage(url)) {
+                    webView.evaluateJavascript(SCROLL_JS, null)
+                }
             }
 
             // 主框架加载失败才弹错误页；子资源（图片等）失败忽略，避免误伤
@@ -324,18 +363,15 @@ class MainActivity : Activity() {
             // 兜底：若页面已完成回调未触发（极少见），4 秒后强制收起
             mainHandler.postDelayed({ swipe.isRefreshing = false }, 4000)
         }
-        // 关键修复：只有 WebView 处于「最顶部」时才允许下拉刷新。
-        // 手势进行中 SwipeRefreshLayout 会持续询问「子内容能否向上滚动」，
-        // 只要页面没滚到顶（scrollY>0）就返回 true → 刷新手势被抑制，
-        // 这样页面内向下滚动/翻页不会再误触刷新。
-        swipe.setOnChildScrollUpCallback { _, _ -> webView.scrollY > 0 }
+        // 关键修复：只有业务页处于「最顶部」时才允许下拉刷新。
+        // 由 JS 桥接实时上报 pageAtTop（含内层滚动容器；webView.scrollY 只反映
+        // 文档滚动、内层 div 滚动时恒为 0 会误判在顶部），只要页面没滚到顶就
+        // 返回 true → 刷新手势被抑制，页面内向下滚动/翻页不再误触刷新。
+        swipe.isEnabled = true
+        swipe.setOnChildScrollUpCallback { _, _ -> !pageAtTop }
         // 加大触发距离：必须「长拉」才刷新，避免轻微下拉就跳屏刷新（默认约 64dp）
         val triggerPx = (resources.displayMetrics.density * 140).toInt()
         swipe.setDistanceToTriggerSync(triggerPx)
-        // 兜底：滚动离开顶部即禁用刷新（兼容个别 WebView 版本回调不触发的情况）
-        webView.setOnScrollChangeListener { _, _, scrollY, _, _ ->
-            swipe.isEnabled = scrollY == 0
-        }
     }
 
     // ===== 热更新：后台拉取业务页，按 APP_VERSION 判断是否需要更新 =====

@@ -36,8 +36,15 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.os.Environment
+import androidx.core.content.FileProvider
+import org.json.JSONObject
 
 /**
  * 万龙洲供应链申购系统 —— 安卓壳（准原生增强版）
@@ -74,6 +81,22 @@ class MainActivity : Activity() {
     private var bizUrl: String? = null
     private var pendingRestart = false
 
+    /** 业务页声明的最新 APK 元信息（checkUpdateAsync 从最新网页字节解析），用于应用内更新提示 */
+    private var latestAppUpdate: JSONObject? = null
+    private var apkDownloadId: Long = -1L
+    private var apkFileName: String = ""
+    private var downloadManager: DownloadManager? = null
+    /** 下载完成广播接收器：自动拉起安装 */
+    private val apkDownloadReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context?, intent: Intent?) {
+            if (intent?.action == DownloadManager.ACTION_DOWNLOAD_COMPLETE &&
+                intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L) == apkDownloadId
+            ) {
+                promptInstall()
+            }
+        }
+    }
+
     private val mainHandler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
 
@@ -97,6 +120,9 @@ class MainActivity : Activity() {
         applySystemBars()
         setupWebView()
         setupSwipe()
+
+        downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        registerReceiver(apkDownloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
 
         findViewById<Button>(R.id.btnRetry).setOnClickListener {
             errorView.visibility = View.GONE
@@ -237,6 +263,7 @@ class MainActivity : Activity() {
 
         // JS 桥接：页面据此上报真实滚动位置，供下拉刷新判断是否处于顶部
         webView.addJavascriptInterface(WbScrollBridge(), "__wbScroll")
+        webView.addJavascriptInterface(WlzAppBridge(), "__wlzApp")
 
         webView.webViewClient = object : WebViewClient() {
 
@@ -470,6 +497,12 @@ class MainActivity : Activity() {
                 }
                 val bytes = conn.inputStream.use { it.readBytes() }
                 val head = String(bytes, 0, minOf(bytes.size, 200_000), Charsets.UTF_8)
+                // v1.7：业务页内嵌 window.WLZ_APP_UPDATE，解析后用于应用内更新提示（独立于页面热更新）
+                val appUp = extractAppUpdate(head)
+                if (appUp != null) {
+                    latestAppUpdate = appUp
+                    maybePromptAppUpdate()
+                }
                 val ver = PageCache.extractVersion(head)
                 if (ver == null) {
                     if (notify) mainHandler.post { toast("未能识别页面版本") }
@@ -506,6 +539,89 @@ class MainActivity : Activity() {
         } catch (_: Exception) {
             // 兜底：重启失败就提示用户手动退出重开
             toast("更新已就绪，请退出应用后重新打开")
+        }
+    }
+
+    // ===== 应用内更新提示（v1.7）=====
+    /** 从最新网页字节解析 window.WLZ_APP_UPDATE JSON（含 versionCode/versionName/url/note） */
+    private fun extractAppUpdate(head: String): JSONObject? {
+        val m = Regex("""window\.WLZ_APP_UPDATE\s*=\s*(\{[^\n]*?\});""").find(head) ?: return null
+        return try { JSONObject(m.groupValues[1]) } catch (_: Exception) { null }
+    }
+
+    /** 业务页声明了比当前更高的 APK 版本时，弹「发现新版本」对话框（每个版本仅提示一次） */
+    private fun maybePromptAppUpdate() {
+        val up = latestAppUpdate ?: return
+        val remoteCode = try { up.getInt("versionCode") } catch (_: Exception) { return }
+        if (remoteCode <= BuildConfig.VERSION_CODE) return
+        val key = "apk_update_prompted_$remoteCode"
+        if (prefs.getBoolean(key, false)) return
+        prefs.edit().putBoolean(key, true).apply()
+        val name = up.optString("versionName", remoteCode.toString())
+        val note = up.optString("note", "")
+        val url = up.optString("url", "")
+        if (url.isBlank()) return
+        mainHandler.post {
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("发现新版本 v$name")
+                .setMessage(if (note.isBlank()) "有新版可用，点击下载更新。" else note)
+                .setPositiveButton("立即下载") { _, _ -> downloadApk(url, name) }
+                .setNegativeButton("稍后", null)
+                .setCancelable(false)
+                .show()
+        }
+    }
+
+    /** 用系统 DownloadManager 下载 APK 到应用私有下载目录，完成后由广播接收器拉起安装 */
+    private fun downloadApk(url: String, versionName: String) {
+        try {
+            val dm = downloadManager
+                ?: (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager)
+            apkFileName = "wanlongzhou-supply-v$versionName.apk"
+            val req = DownloadManager.Request(Uri.parse(url)).apply {
+                setTitle("万龙洲供应链 App v$versionName")
+                setDescription("正在下载更新包…")
+                setMimeType("application/vnd.android.package-archive")
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationInExternalFilesDir(this@MainActivity, Environment.DIRECTORY_DOWNLOADS, apkFileName)
+            }
+            apkDownloadId = dm.enqueue(req)
+            Toast.makeText(this, "开始下载更新包，完成后自动提示安装", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "下载失败：${e.message ?: "未知错误"}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** 下载完成后拉起系统安装器（FileProvider 暴露应用私有下载目录，兼容 Android 7+） */
+    private fun promptInstall() {
+        try {
+            val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return
+            val file = File(dir, apkFileName)
+            if (!file.exists()) {
+                Toast.makeText(this, "安装包未找到", Toast.LENGTH_SHORT).show()
+                return
+            }
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(
+                this,
+                "无法安装：${e.message ?: "未知错误"}（请到设置中允许「安装未知应用」）",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    /** JS 桥：网页登录后可调用 window.__wlzApp.checkUpdate() 主动触发检测 */
+    inner class WlzAppBridge {
+        @JavascriptInterface
+        fun checkUpdate() {
+            mainHandler.post { maybePromptAppUpdate() }
         }
     }
 
@@ -681,6 +797,11 @@ class MainActivity : Activity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         webView.saveState(outState)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try { unregisterReceiver(apkDownloadReceiver) } catch (_: Exception) {}
     }
 
     companion object {

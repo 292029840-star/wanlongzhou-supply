@@ -52,3 +52,13 @@ jobs:
           name: wanlongzhou-supply-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
+
+      # 打 tag 时自动建 GitHub Release 并附上 APK，供应用内更新一键下载
+      # 下载直链：https://github.com/<repo>/releases/download/<tag>/app-debug.apk
+      - name: 创建 Release 并附 APK
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 万龙洲供应链 App ${{ github.ref_name }}
+          body: 自动构建的 Debug 安装包（应用内更新可用）
+          files: app/build/outputs/apk/debug/app-debug.apk

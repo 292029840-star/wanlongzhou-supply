@@ -140,44 +140,41 @@ class MainActivity : Activity() {
         })();
     """.trimIndent()
 
-    /** 隐藏 WorkBuddy 平台外壳渲染的「回WorkBuddy继续聊」浮窗按钮（v1.3）。
+    /** 隐藏 WorkBuddy 平台外壳渲染的「回WorkBuddy继续聊」浮窗按钮（v1.4）。
        该浮窗不在我们业务页 HTML 内，是平台客户端注入的 chrome，只能原生注入 JS 隐藏。
-       平台按钮可能异步渲染，故轮询 + MutationObserver 双保险。 */
+       v1.3 教训：不能用 class 里含 'workbuddy' 的宽泛正则，会误把整个平台 body/主容器一起隐藏 → 白屏。
+       修复策略：只按文本「回WorkBuddy / 继续聊」命中，外加极少数明确的浮窗 class，并加防抖避免阻塞首屏。 */
     private val HIDE_FAB_JS = """
         (function(){
-          function hideEl(el){ if(el){ el.style.display='none'; el.style.visibility='hidden'; } }
+          function hideEl(el){ if(el && el.style){ el.style.display='none'; el.style.visibility='hidden'; el.style.pointerEvents='none'; } }
+          var clsRe = /wk-fab|chat-float|float-chat|back-to|continue-chat|floating-btn|fab-btn/i;
           function hideWbFab(){
             try{
-              var nodes = document.querySelectorAll('a,button,div,span');
+              var nodes = document.querySelectorAll('a,button,div,span,img,svg');
               for(var i=0;i<nodes.length;i++){
                 var el = nodes[i];
                 var txt = (el.innerText||el.textContent||'').trim();
-                if(txt && (txt.indexOf('回WorkBuddy')>=0 || txt.indexOf('继续聊')>=0)){
-                  hideEl(el);
-                  var p = el;
-                  while(p && p !== document.body){
-                    if(p.tagName === 'A' || p.tagName === 'BUTTON'){ hideEl(p); break; }
-                    p = p.parentElement;
-                  }
-                }
                 var cls = (el.className||'').toString();
-                if(/workbuddy|wk-fab|chat-float|float-chat|back-to|continue-chat|floating-btn|fab-btn/i.test(cls)){
-                  hideEl(el);
-                }
+                if(txt && (txt.indexOf('回WorkBuddy')>=0 || txt.indexOf('继续聊')>=0)){ hideEl(el); }
+                else if(clsRe.test(cls)){ hideEl(el); }
               }
               var links = document.querySelectorAll('a[href*="workbuddy"]');
               for(var j=0;j<links.length;j++){
-                var l = links[j]; var lt = (l.innerText||'').trim();
-                if(lt.indexOf('WorkBuddy')>=0 || lt.indexOf('继续聊')>=0){ hideEl(l); }
+                var l = links[j], lt = (l.innerText||'').trim();
+                if(lt.indexOf('回WorkBuddy')>=0 || lt.indexOf('继续聊')>=0){ hideEl(l); }
               }
             }catch(e){}
           }
           hideWbFab();
-          setTimeout(hideWbFab, 600);
-          setTimeout(hideWbFab, 1500);
-          setTimeout(hideWbFab, 3000);
+          [600,1500,3000,6000].forEach(function(t){ setTimeout(hideWbFab, t); });
           if(window.MutationObserver){
-            try{ new MutationObserver(function(){ hideWbFab(); }).observe(document.body, {childList:true, subtree:true}); }catch(e){}
+            try{
+              var timer = null;
+              new MutationObserver(function(){
+                if(timer) return;
+                timer = setTimeout(function(){ timer=null; hideWbFab(); }, 120);
+              }).observe(document.body, {childList:true, subtree:true});
+            }catch(e){}
           }
         })();
     """.trimIndent()

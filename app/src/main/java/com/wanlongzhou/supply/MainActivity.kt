@@ -400,16 +400,7 @@ class MainActivity : Activity() {
     // ===== 下拉刷新 =====
     private fun setupSwipe() {
         swipe.setColorSchemeColors(getColorCompat(R.color.colorPrimary))
-        swipe.setOnRefreshListener {
-            // v1.3：软刷新当前视图，而不是 webView.reload()（reload 会重载外壳页 → 重新鉴权 → 跳登录页）。
-            // 业务页暴露了 window.__wlzSoftRefresh；降级到 location.reload(true) 仅当钩子缺失（旧版业务页）。
-            webView.evaluateJavascript(
-                "if(window.__wlzSoftRefresh){window.__wlzSoftRefresh();}else{location.reload(true);}",
-                null
-            )
-            // 兜底：若页面已完成回调未触发（极少见），1.5 秒后强制收起
-            mainHandler.postDelayed({ swipe.isRefreshing = false }, 1500)
-        }
+        swipe.setOnRefreshListener { trySoftRefresh(0) }
         // 关键修复：只有业务页处于「最顶部」时才允许下拉刷新。
         // 由 JS 桥接实时上报 pageAtTop（含内层滚动容器；webView.scrollY 只反映
         // 文档滚动、内层 div 滚动时恒为 0 会误判在顶部），只要页面没滚到顶就
@@ -419,6 +410,39 @@ class MainActivity : Activity() {
         // 加大触发距离：必须「长拉」才刷新，避免轻微下拉就跳屏刷新（默认约 64dp）
         val triggerPx = (resources.displayMetrics.density * 140).toInt()
         swipe.setDistanceToTriggerSync(triggerPx)
+    }
+
+    /**
+     * 软刷新当前视图（v1.6 加固）。
+     *
+     * 背景：v1.2 及更早用 webView.reload()，会连外壳页（SPA 外壳持有登录态）一起重载
+     * → 重新鉴权 → 跳登录页。v1.3 改为调用业务页的 window.__wlzSoftRefresh，但降级分支
+     * 仍是 location.reload()：App 刚启动、业务页脚本还没执行完时下拉，钩子不存在就会
+     * 走降级 → 依然跳登录。这是「修了但还是会跳登录」的根因。
+     *
+     * 现在的行为：
+     *  - 钩子未就绪（返回 false / 回调为空）→ 每 400ms 重试，最多 5 次（约 2 秒）；
+     *  - 始终不 reload：重试耗尽也只是收起刷新动画并轻提示，绝不触碰外壳页导航。
+     */
+    private fun trySoftRefresh(retry: Int) {
+        val js = "(function(){try{return (window.__wlzSoftRefresh && window.__wlzSoftRefresh()===true)?'ok':'no';}catch(e){return 'no';}})()"
+        webView.evaluateJavascript(js) { res ->
+            val ok = res != null && res.contains("ok")
+            when {
+                ok -> {
+                    // 数据拉取是异步的，稍等再收动画，避免「转一下就没了」
+                    mainHandler.postDelayed({ swipe.isRefreshing = false }, 600)
+                }
+                retry < 5 -> {
+                    // 业务页尚未就绪（刚启动 / 正在热更新），延迟重试
+                    mainHandler.postDelayed({ trySoftRefresh(retry + 1) }, 400)
+                }
+                else -> {
+                    swipe.isRefreshing = false
+                    Toast.makeText(this, "页面还在加载，请稍候再拉", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     // ===== 热更新：后台拉取业务页，按 APP_VERSION 判断是否需要更新 =====

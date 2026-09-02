@@ -72,6 +72,7 @@ class MainActivity : Activity() {
     /** 业务页真实地址（含 rev 段，首次由 WebView 请求时捕获，供后台更新用） */
     @Volatile
     private var bizUrl: String? = null
+    private var pendingRestart = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
@@ -453,15 +454,35 @@ class MainActivity : Activity() {
                 val updated = PageCache.save(this@MainActivity, bytes, ver)
                 mainHandler.post {
                     when {
-                        updated && notify -> toast("已更新到 $ver，重启 App 生效")
-                        updated -> toast("已下载新版 $ver，下次启动生效")
+                        updated && notify -> toast("已更新到 $ver，即将自动应用")
+                        updated -> toast("已下载新版 $ver，即将自动应用")
                         notify -> toast("已是最新（$ver）")
+                    }
+                    // 下载到新版本：延迟后自动重启应用，等效「退出重开」，
+                    // 让本地已覆盖的新业务页缓存立即生效（登录态在 WebView 持久，重启不跳登录）。
+                    if (updated && !pendingRestart) {
+                        pendingRestart = true
+                        mainHandler.postDelayed({ restartApp() }, 2200)
                     }
                 }
             } catch (e: Exception) {
                 if (notify) mainHandler.post { toast("检查更新失败：${e.message ?: "网络异常"}") }
             }
         }.start()
+    }
+
+    /** 自动重启应用：重新走启动流程，加载已覆盖的新业务页缓存（热更新立即生效）。
+       登录态保存在 WebView 持久存储，重启不会跳登录。 */
+    private fun restartApp() {
+        try {
+            val intent = baseContext.packageManager.getLaunchIntentForPackage(baseContext.packageName)
+            intent?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+            finish()
+        } catch (_: Exception) {
+            // 兜底：重启失败就提示用户手动退出重开
+            toast("更新已就绪，请退出应用后重新打开")
+        }
     }
 
     private fun showNetworkError(desc: String?) {

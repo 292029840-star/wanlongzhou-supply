@@ -324,7 +324,15 @@ class MainActivity : Activity() {
             // 兜底：若页面已完成回调未触发（极少见），4 秒后强制收起
             mainHandler.postDelayed({ swipe.isRefreshing = false }, 4000)
         }
-        // 只有页面滚到顶部时才允许下拉，避免与页面内滚动冲突
+        // 关键修复：只有 WebView 处于「最顶部」时才允许下拉刷新。
+        // 手势进行中 SwipeRefreshLayout 会持续询问「子内容能否向上滚动」，
+        // 只要页面没滚到顶（scrollY>0）就返回 true → 刷新手势被抑制，
+        // 这样页面内向下滚动/翻页不会再误触刷新。
+        swipe.setOnChildScrollUpCallback { _, _ -> webView.scrollY > 0 }
+        // 加大触发距离：必须「长拉」才刷新，避免轻微下拉就跳屏刷新（默认约 64dp）
+        val triggerPx = (resources.displayMetrics.density * 140).toInt()
+        swipe.setDistanceToTriggerSync(triggerPx)
+        // 兜底：滚动离开顶部即禁用刷新（兼容个别 WebView 版本回调不触发的情况）
         webView.setOnScrollChangeListener { _, _, scrollY, _, _ ->
             swipe.isEnabled = scrollY == 0
         }

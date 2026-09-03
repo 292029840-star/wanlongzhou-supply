@@ -65,7 +65,7 @@ class MainActivity : Activity() {
     private lateinit var progress: ProgressBar
     private lateinit var swipe: SwipeRefreshLayout
     private lateinit var splash: View
-    private lateinit var errorView: View
+    private lateinit var errView: View
 
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
@@ -107,7 +107,7 @@ class MainActivity : Activity() {
         progress = findViewById(R.id.progress)
         swipe = findViewById(R.id.swipe)
         splash = findViewById(R.id.splash)
-        errorView = findViewById(R.id.errorView)
+        errView = findViewById(R.id.errorView)
 
         applySystemBars()
         setupWebView()
@@ -121,7 +121,7 @@ class MainActivity : Activity() {
         }
 
         findViewById<Button>(R.id.btnRetry).setOnClickListener {
-            errorView.visibility = View.GONE
+            errView.visibility = View.GONE
             splash.visibility = View.VISIBLE
             loadHome()
         }
@@ -207,7 +207,7 @@ class MainActivity : Activity() {
     private fun loadHome() {
         val url = homeUrl
         val sep = if (url.contains("?")) "&" else "?"
-        errorView.visibility = View.GONE
+        errView.visibility = View.GONE
         splash.visibility = View.VISIBLE
         webView.loadUrl(url + sep + "_t=" + System.currentTimeMillis())
     }
@@ -566,7 +566,7 @@ class MainActivity : Activity() {
     }
 
     private fun showNetworkError(desc: String?) {
-        val v = errorView
+        val v = errView
         v.findViewById<TextView>(R.id.errorText).text =
             if (isOnline()) (desc ?: "椤甸潰鍔犺浇澶辫触") else getString(R.string.net_error_msg)
         v.visibility = View.VISIBLE

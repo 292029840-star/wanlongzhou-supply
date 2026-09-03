@@ -47,6 +47,10 @@ jobs:
       - name: 赋予 gradlew 执行权限
         run: chmod +x gradlew
 
+      # 清缓存避免历史构建污染
+      - name: 清理构建缓存
+        run: ./gradlew clean --no-daemon
+
       # 固定签名：从 repo Secret 解码 PKCS12 keystore，所有版本签名一致 → 可无缝覆盖升级
       - name: 解码签名密钥并构建 Release APK
         run: |

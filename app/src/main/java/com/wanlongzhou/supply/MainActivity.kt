@@ -1,4 +1,4 @@
-﻿package com.wanlongzhou.supply
+package com.wanlongzhou.supply
 
 import android.annotation.SuppressLint
 import android.app.Activity

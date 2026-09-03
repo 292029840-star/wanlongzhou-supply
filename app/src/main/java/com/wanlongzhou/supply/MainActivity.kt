@@ -1,4 +1,4 @@
-package com.wanlongzhou.supply
+﻿package com.wanlongzhou.supply
 
 import android.annotation.SuppressLint
 import android.app.Activity
@@ -47,27 +47,20 @@ import androidx.core.content.FileProvider
 import org.json.JSONObject
 
 /**
- * 万龙洲供应链申购系统 —— 安卓壳（准原生增强版）
- *
- * ── 设计原则 ────────────────────────────────────────────
- * 界面 / 业务逻辑 100% 由网页端承载，本壳不碰任何业务代码，只做：
- *
- *   1. 关掉 WebView 网络缓存 —— 根治「新单据闪现即消失 / 状态回退」
- *   2. 打开 localStorage    —— 草稿机制依赖，关掉会丢草稿
- *   3. 本地缓存业务页 + 热更新 —— 秒开，且改网页【不用重新打包】
- *   4. 闪屏 / 下拉刷新 / 返回键 / 原生打印 / 断网提示 —— 抹掉「网页感」
- *
- * ── 为什么缓存是安全的（改动前必读，见 PageCache 注释）────────
- * 线上是两层：外壳页（4KB，注入 SDK 与登录态，【必须走网络】）
- *            + 业务页（540KB，纯静态无 token，【可安全缓存】）
- * 这里只缓存后者，因此不会影响登录态与数据访问。
- */
+ * 涓囬緳娲蹭緵搴旈摼鐢宠喘绯荤粺 鈥斺€?瀹夊崜澹筹紙鍑嗗師鐢熷寮虹増锛? *
+ * 鈹€鈹€ 璁捐鍘熷垯 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+ * 鐣岄潰 / 涓氬姟閫昏緫 100% 鐢辩綉椤电鎵胯浇锛屾湰澹充笉纰颁换浣曚笟鍔′唬鐮侊紝鍙仛锛? *
+ *   1. 鍏虫帀 WebView 缃戠粶缂撳瓨 鈥斺€?鏍规不銆屾柊鍗曟嵁闂幇鍗虫秷澶?/ 鐘舵€佸洖閫€銆? *   2. 鎵撳紑 localStorage    鈥斺€?鑽夌鏈哄埗渚濊禆锛屽叧鎺変細涓㈣崏绋? *   3. 鏈湴缂撳瓨涓氬姟椤?+ 鐑洿鏂?鈥斺€?绉掑紑锛屼笖鏀圭綉椤点€愪笉鐢ㄩ噸鏂版墦鍖呫€? *   4. 闂睆 / 涓嬫媺鍒锋柊 / 杩斿洖閿?/ 鍘熺敓鎵撳嵃 / 鏂綉鎻愮ず 鈥斺€?鎶规帀銆岀綉椤垫劅銆? *
+ * 鈹€鈹€ 涓轰粈涔堢紦瀛樻槸瀹夊叏鐨勶紙鏀瑰姩鍓嶅繀璇伙紝瑙?PageCache 娉ㄩ噴锛夆攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+ * 绾夸笂鏄袱灞傦細澶栧３椤碉紙4KB锛屾敞鍏?SDK 涓庣櫥褰曟€侊紝銆愬繀椤昏蛋缃戠粶銆戯級
+ *            + 涓氬姟椤碉紙540KB锛岀函闈欐€佹棤 token锛屻€愬彲瀹夊叏缂撳瓨銆戯級
+ * 杩欓噷鍙紦瀛樺悗鑰咃紝鍥犳涓嶄細褰卞搷鐧诲綍鎬佷笌鏁版嵁璁块棶銆? */
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
 
-    /** 业务页当前是否处于顶部（由页面 JS 实时上报，含内层滚动容器）；
-     *  SwipeRefreshLayout 据此判断是否允许下拉刷新。 */
+    /** 涓氬姟椤靛綋鍓嶆槸鍚﹀浜庨《閮紙鐢遍〉闈?JS 瀹炴椂涓婃姤锛屽惈鍐呭眰婊氬姩瀹瑰櫒锛夛紱
+     *  SwipeRefreshLayout 鎹鍒ゆ柇鏄惁鍏佽涓嬫媺鍒锋柊銆?*/
     private var pageAtTop = true
     private lateinit var progress: ProgressBar
     private lateinit var swipe: SwipeRefreshLayout
@@ -76,17 +69,16 @@ class MainActivity : Activity() {
 
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
-    /** 业务页真实地址（含 rev 段，首次由 WebView 请求时捕获，供后台更新用） */
+    /** 涓氬姟椤电湡瀹炲湴鍧€锛堝惈 rev 娈碉紝棣栨鐢?WebView 璇锋眰鏃舵崟鑾凤紝渚涘悗鍙版洿鏂扮敤锛?*/
     @Volatile
     private var bizUrl: String? = null
-    private var pendingRestart = false
 
-    /** 业务页声明的最新 APK 元信息（checkUpdateAsync 从最新网页字节解析），用于应用内更新提示 */
+    /** 涓氬姟椤靛０鏄庣殑鏈€鏂?APK 鍏冧俊鎭紙checkUpdateAsync 浠庢渶鏂扮綉椤靛瓧鑺傝В鏋愶級锛岀敤浜庡簲鐢ㄥ唴鏇存柊鎻愮ず */
     private var latestAppUpdate: JSONObject? = null
     private var apkDownloadId: Long = -1L
     private var apkFileName: String = ""
     private var downloadManager: DownloadManager? = null
-    /** 下载完成广播接收器：自动拉起安装 */
+    /** 涓嬭浇瀹屾垚骞挎挱鎺ユ敹鍣細鑷姩鎷夎捣瀹夎 */
     private val apkDownloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
             if (intent?.action == DownloadManager.ACTION_DOWNLOAD_COMPLETE &&
@@ -102,7 +94,7 @@ class MainActivity : Activity() {
 
     private var lastBackAt = 0L
 
-    /** 当前生效的业务地址（可在 App 内改，默认取线上地址） */
+    /** 褰撳墠鐢熸晥鐨勪笟鍔″湴鍧€锛堝彲鍦?App 鍐呮敼锛岄粯璁ゅ彇绾夸笂鍦板潃锛?*/
     private val homeUrl: String
         get() = prefs.getString(KEY_URL, DEFAULT_URL)
             ?.takeIf { it.isNotBlank() } ?: DEFAULT_URL
@@ -121,8 +113,12 @@ class MainActivity : Activity() {
         setupWebView()
         setupSwipe()
 
-        downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        registerReceiver(apkDownloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+        // 搴旂敤鍐呮洿鏂颁緷璧栫殑涓嬭浇绠＄悊鍣細鍖呬竴灞?try-catch锛岄槻姝釜鍒満鍨?绯荤粺鏈嶅姟寮傚父瀵艰嚧鍐峰惎鍔ㄩ棯閫€銆?        // 鍗充究杩欓噷澶辫触锛屽彧鏄€屽簲鐢ㄥ唴鏇存柊銆嶅姛鑳戒笉鍙敤锛屼富涓氬姟锛圵ebView锛変笉鍙楀奖鍝嶃€?        try {
+            downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            registerReceiver(apkDownloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+        } catch (e: Exception) {
+            android.util.Log.w("WlzApp", "涓嬭浇绠＄悊鍣ㄥ垵濮嬪寲澶辫触锛屽簲鐢ㄥ唴鏇存柊鏆備笉鍙敤: ${e.message}")
+        }
 
         findViewById<Button>(R.id.btnRetry).setOnClickListener {
             errorView.visibility = View.GONE
@@ -138,7 +134,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /** 状态栏 / 导航栏统一为品牌色，去掉视觉割裂 */
+    /** 鐘舵€佹爮 / 瀵艰埅鏍忕粺涓€涓哄搧鐗岃壊锛屽幓鎺夎瑙夊壊瑁?*/
     private fun applySystemBars() {
         window.statusBarColor = getColorCompat(R.color.colorPrimaryDark)
         window.navigationBarColor = getColorCompat(R.color.colorPrimaryDark)
@@ -148,11 +144,7 @@ class MainActivity : Activity() {
     private fun getColorCompat(id: Int): Int =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) getColor(id) else resources.getColor(id)
 
-    /** 注入到业务页的滚动探测脚本：监听（含捕获阶段）所有 scroll 事件，
-     *  同时读 window.scrollY（文档滚动）和事件目标 scrollTop（内层容器滚动），
-     *  实时上报「是否在顶部」给原生，供 SwipeRefreshLayout 判断是否允许刷新。
-     *  关键：webView.scrollY 只反映文档滚动，页面在内层 div 滚动时恒为 0，
-     *  会误判「在顶部」导致翻页/滚动中误触刷新——这里用真实滚动位置根治。 */
+    /** 娉ㄥ叆鍒颁笟鍔￠〉鐨勬粴鍔ㄦ帰娴嬭剼鏈細鐩戝惉锛堝惈鎹曡幏闃舵锛夋墍鏈?scroll 浜嬩欢锛?     *  鍚屾椂璇?window.scrollY锛堟枃妗ｆ粴鍔級鍜屼簨浠剁洰鏍?scrollTop锛堝唴灞傚鍣ㄦ粴鍔級锛?     *  瀹炴椂涓婃姤銆屾槸鍚﹀湪椤堕儴銆嶇粰鍘熺敓锛屼緵 SwipeRefreshLayout 鍒ゆ柇鏄惁鍏佽鍒锋柊銆?     *  鍏抽敭锛歸ebView.scrollY 鍙弽鏄犳枃妗ｆ粴鍔紝椤甸潰鍦ㄥ唴灞?div 婊氬姩鏃舵亽涓?0锛?     *  浼氳鍒ゃ€屽湪椤堕儴銆嶅鑷寸炕椤?婊氬姩涓瑙﹀埛鏂扳€斺€旇繖閲岀敤鐪熷疄婊氬姩浣嶇疆鏍规不銆?*/
     private val SCROLL_JS = """
         (function(){
           function report(e){
@@ -167,10 +159,7 @@ class MainActivity : Activity() {
         })();
     """.trimIndent()
 
-    /** 隐藏 WorkBuddy 平台外壳渲染的「回WorkBuddy继续聊」浮窗按钮（v1.4）。
-       该浮窗不在我们业务页 HTML 内，是平台客户端注入的 chrome，只能原生注入 JS 隐藏。
-       v1.3 教训：不能用 class 里含 'workbuddy' 的宽泛正则，会误把整个平台 body/主容器一起隐藏 → 白屏。
-       修复策略：只按文本「回WorkBuddy / 继续聊」命中，外加极少数明确的浮窗 class，并加防抖避免阻塞首屏。 */
+    /** 闅愯棌 WorkBuddy 骞冲彴澶栧３娓叉煋鐨勩€屽洖WorkBuddy缁х画鑱娿€嶆诞绐楁寜閽紙v1.4锛夈€?       璇ユ诞绐椾笉鍦ㄦ垜浠笟鍔￠〉 HTML 鍐咃紝鏄钩鍙板鎴风娉ㄥ叆鐨?chrome锛屽彧鑳藉師鐢熸敞鍏?JS 闅愯棌銆?       v1.3 鏁欒锛氫笉鑳界敤 class 閲屽惈 'workbuddy' 鐨勫娉涙鍒欙紝浼氳鎶婃暣涓钩鍙?body/涓诲鍣ㄤ竴璧烽殣钘?鈫?鐧藉睆銆?       淇绛栫暐锛氬彧鎸夋枃鏈€屽洖WorkBuddy / 缁х画鑱娿€嶅懡涓紝澶栧姞鏋佸皯鏁版槑纭殑娴獥 class锛屽苟鍔犻槻鎶栭伩鍏嶉樆濉為灞忋€?*/
     private val HIDE_FAB_JS = """
         (function(){
           function hideEl(el){ if(el && el.style){ el.style.display='none'; el.style.visibility='hidden'; el.style.pointerEvents='none'; } }
@@ -182,13 +171,13 @@ class MainActivity : Activity() {
                 var el = nodes[i];
                 var txt = (el.innerText||el.textContent||'').trim();
                 var cls = (el.className||'').toString();
-                if(txt && (txt.indexOf('回WorkBuddy')>=0 || txt.indexOf('继续聊')>=0)){ hideEl(el); }
+                if(txt && (txt.indexOf('鍥濿orkBuddy')>=0 || txt.indexOf('缁х画鑱?)>=0)){ hideEl(el); }
                 else if(clsRe.test(cls)){ hideEl(el); }
               }
               var links = document.querySelectorAll('a[href*="workbuddy"]');
               for(var j=0;j<links.length;j++){
                 var l = links[j], lt = (l.innerText||'').trim();
-                if(lt.indexOf('回WorkBuddy')>=0 || lt.indexOf('继续聊')>=0){ hideEl(l); }
+                if(lt.indexOf('鍥濿orkBuddy')>=0 || lt.indexOf('缁х画鑱?)>=0){ hideEl(l); }
               }
             }catch(e){}
           }
@@ -206,7 +195,7 @@ class MainActivity : Activity() {
         })();
     """.trimIndent()
 
-    /** JS 桥接：接收页面上报的「是否在顶部」 */
+    /** JS 妗ユ帴锛氭帴鏀堕〉闈笂鎶ョ殑銆屾槸鍚﹀湪椤堕儴銆?*/
     inner class WbScrollBridge {
         @JavascriptInterface
         fun atTop(v: Int) {
@@ -214,7 +203,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /** 主地址带时间戳加载，确保每次拿到最新外壳页（业务页走本地缓存，见拦截逻辑） */
+    /** 涓诲湴鍧€甯︽椂闂存埑鍔犺浇锛岀‘淇濇瘡娆℃嬁鍒版渶鏂板澹抽〉锛堜笟鍔￠〉璧版湰鍦扮紦瀛橈紝瑙佹嫤鎴€昏緫锛?*/
     private fun loadHome() {
         val url = homeUrl
         val sep = if (url.contains("?")) "&" else "?"
@@ -229,15 +218,11 @@ class MainActivity : Activity() {
 
         s.javaScriptEnabled = true
 
-        // ===== 关键 1：禁用 WebView 网络缓存 =====
-        // 安卓 WebView 默认会缓存请求，把「写库之前」的旧数据返回给页面，
-        // 表现为：新单据闪现一下就消失、点发货后状态又变回「待发货」。
-        // 桌面 Chrome 与 iOS Safari 缓存策略没这么激进，所以只有安卓复现。
-        s.cacheMode = WebSettings.LOAD_NO_CACHE
+        // ===== 鍏抽敭 1锛氱鐢?WebView 缃戠粶缂撳瓨 =====
+        // 瀹夊崜 WebView 榛樿浼氱紦瀛樿姹傦紝鎶娿€屽啓搴撲箣鍓嶃€嶇殑鏃ф暟鎹繑鍥炵粰椤甸潰锛?        // 琛ㄧ幇涓猴細鏂板崟鎹棯鐜颁竴涓嬪氨娑堝け銆佺偣鍙戣揣鍚庣姸鎬佸張鍙樺洖銆屽緟鍙戣揣銆嶃€?        // 妗岄潰 Chrome 涓?iOS Safari 缂撳瓨绛栫暐娌¤繖涔堟縺杩涳紝鎵€浠ュ彧鏈夊畨鍗撳鐜般€?        s.cacheMode = WebSettings.LOAD_NO_CACHE
 
-        // ===== 关键 2：必须开启 localStorage =====
-        // 系统的草稿机制、本地缓存都依赖它，关掉会丢草稿。
-        s.domStorageEnabled = true
+        // ===== 鍏抽敭 2锛氬繀椤诲紑鍚?localStorage =====
+        // 绯荤粺鐨勮崏绋挎満鍒躲€佹湰鍦扮紦瀛橀兘渚濊禆瀹冿紝鍏虫帀浼氫涪鑽夌銆?        s.domStorageEnabled = true
         s.databaseEnabled = true
 
         s.useWideViewPort = true
@@ -251,8 +236,7 @@ class MainActivity : Activity() {
         s.defaultTextEncodingName = "UTF-8"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            // 允许 https 页面里的 http 子资源（后期内网 NAS 多为 http）
-            s.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            // 鍏佽 https 椤甸潰閲岀殑 http 瀛愯祫婧愶紙鍚庢湡鍐呯綉 NAS 澶氫负 http锛?            s.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         }
         s.userAgentString = s.userAgentString + " WLZSupply/1.0"
 
@@ -261,19 +245,15 @@ class MainActivity : Activity() {
             CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
         }
 
-        // JS 桥接：页面据此上报真实滚动位置，供下拉刷新判断是否处于顶部
-        webView.addJavascriptInterface(WbScrollBridge(), "__wbScroll")
+        // JS 妗ユ帴锛氶〉闈㈡嵁姝や笂鎶ョ湡瀹炴粴鍔ㄤ綅缃紝渚涗笅鎷夊埛鏂板垽鏂槸鍚﹀浜庨《閮?        webView.addJavascriptInterface(WbScrollBridge(), "__wbScroll")
         webView.addJavascriptInterface(WlzAppBridge(), "__wlzApp")
 
         webView.webViewClient = object : WebViewClient() {
 
             /**
-             * 拦截业务页请求：命中则用本地缓存直接返回（秒开），
-             * 否则放行走网络。同时记下真实地址，供后台热更新使用。
-             *
-             * 注意：只拦截业务页（hotel_requisition.html）。
-             * 外壳页与所有数据接口一律放行，否则会拿不到登录态。
-             */
+             * 鎷︽埅涓氬姟椤佃姹傦細鍛戒腑鍒欑敤鏈湴缂撳瓨鐩存帴杩斿洖锛堢寮€锛夛紝
+             * 鍚﹀垯鏀捐璧扮綉缁溿€傚悓鏃惰涓嬬湡瀹炲湴鍧€锛屼緵鍚庡彴鐑洿鏂颁娇鐢ㄣ€?             *
+             * 娉ㄦ剰锛氬彧鎷︽埅涓氬姟椤碉紙hotel_requisition.html锛夈€?             * 澶栧３椤典笌鎵€鏈夋暟鎹帴鍙ｄ竴寰嬫斁琛岋紝鍚﹀垯浼氭嬁涓嶅埌鐧诲綍鎬併€?             */
             override fun shouldInterceptRequest(
                 view: WebView,
                 request: WebResourceRequest
@@ -290,8 +270,7 @@ class MainActivity : Activity() {
                         ByteArrayInputStream(cached)
                     )
                 }
-                return null // 无缓存 → 走网络，后台会立刻补存
-            }
+                return null // 鏃犵紦瀛?鈫?璧扮綉缁滐紝鍚庡彴浼氱珛鍒昏ˉ瀛?            }
 
             override fun shouldOverrideUrlLoading(
                 view: WebView,
@@ -314,19 +293,16 @@ class MainActivity : Activity() {
             override fun onPageFinished(view: WebView, url: String) {
                 progress.visibility = View.GONE
                 swipe.isRefreshing = false
-                // 稍作延迟再收闪屏，避免页面刚渲染完就闪一下白底
-                splash.postDelayed({ splash.visibility = View.GONE }, 250)
-                // 每次加载完顺带检查一次更新（异步，不阻塞）
-                checkUpdateAsync(notify = false)
-                // 业务页注入滚动探测脚本（仅在业务页，避免污染外壳页）
+                // 绋嶄綔寤惰繜鍐嶆敹闂睆锛岄伩鍏嶉〉闈㈠垰娓叉煋瀹屽氨闂竴涓嬬櫧搴?                splash.postDelayed({ splash.visibility = View.GONE }, 250)
+                // 姣忔鍔犺浇瀹岄『甯︽鏌ヤ竴娆℃洿鏂帮紙寮傛锛屼笉闃诲锛?                checkUpdateAsync(notify = false)
+                // 涓氬姟椤垫敞鍏ユ粴鍔ㄦ帰娴嬭剼鏈紙浠呭湪涓氬姟椤碉紝閬垮厤姹℃煋澶栧３椤碉級
                 if (isBizPage(url)) {
                     webView.evaluateJavascript(SCROLL_JS, null)
                 }
-                // v1.3：隐藏平台「回WorkBuddy继续聊」浮窗（外壳页与业务页都注入，双保险）
-                webView.evaluateJavascript(HIDE_FAB_JS, null)
+                // v1.3锛氶殣钘忓钩鍙般€屽洖WorkBuddy缁х画鑱娿€嶆诞绐楋紙澶栧３椤典笌涓氬姟椤甸兘娉ㄥ叆锛屽弻淇濋櫓锛?                webView.evaluateJavascript(HIDE_FAB_JS, null)
             }
 
-            // 主框架加载失败才弹错误页；子资源（图片等）失败忽略，避免误伤
+            // 涓绘鏋跺姞杞藉け璐ユ墠寮归敊璇〉锛涘瓙璧勬簮锛堝浘鐗囩瓑锛夊け璐ュ拷鐣ワ紝閬垮厤璇激
             override fun onReceivedError(
                 view: WebView,
                 request: WebResourceRequest,
@@ -347,16 +323,14 @@ class MainActivity : Activity() {
                 progress.visibility = if (newProgress < 100) View.VISIBLE else View.GONE
             }
 
-            // 必须处理 alert / confirm / prompt：
-            // 不接管的话，网页里的弹窗在 WebView 中不会显示，
-            // confirm 会一直拿不到结果，业务流程直接卡死。
-            override fun onJsAlert(
+            // 蹇呴』澶勭悊 alert / confirm / prompt锛?            // 涓嶆帴绠＄殑璇濓紝缃戦〉閲岀殑寮圭獥鍦?WebView 涓笉浼氭樉绀猴紝
+            // confirm 浼氫竴鐩存嬁涓嶅埌缁撴灉锛屼笟鍔℃祦绋嬬洿鎺ュ崱姝汇€?            override fun onJsAlert(
                 view: WebView, url: String, message: String, result: JsResult
             ): Boolean {
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("提示")
+                    .setTitle("鎻愮ず")
                     .setMessage(message)
-                    .setPositiveButton("确定") { _, _ -> result.confirm() }
+                    .setPositiveButton("纭畾") { _, _ -> result.confirm() }
                     .setCancelable(false)
                     .show()
                 return true
@@ -366,10 +340,10 @@ class MainActivity : Activity() {
                 view: WebView, url: String, message: String, result: JsResult
             ): Boolean {
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("确认")
+                    .setTitle("纭")
                     .setMessage(message)
-                    .setPositiveButton("确定") { _, _ -> result.confirm() }
-                    .setNegativeButton("取消") { _, _ -> result.cancel() }
+                    .setPositiveButton("纭畾") { _, _ -> result.confirm() }
+                    .setNegativeButton("鍙栨秷") { _, _ -> result.cancel() }
                     .setCancelable(false)
                     .show()
                 return true
@@ -382,18 +356,17 @@ class MainActivity : Activity() {
                 val input = EditText(this@MainActivity)
                 input.setText(defaultValue ?: "")
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("请输入")
+                    .setTitle("璇疯緭鍏?)
                     .setMessage(message)
                     .setView(input)
-                    .setPositiveButton("确定") { _, _ -> result.confirm(input.text.toString()) }
-                    .setNegativeButton("取消") { _, _ -> result.cancel() }
+                    .setPositiveButton("纭畾") { _, _ -> result.confirm(input.text.toString()) }
+                    .setNegativeButton("鍙栨秷") { _, _ -> result.cancel() }
                     .setCancelable(false)
                     .show()
                 return true
             }
 
-            // 支持网页里的文件上传（选图片、导入等）
-            override fun onShowFileChooser(
+            // 鏀寔缃戦〉閲岀殑鏂囦欢涓婁紶锛堥€夊浘鐗囥€佸鍏ョ瓑锛?            override fun onShowFileChooser(
                 webView: WebView,
                 callback: ValueCallback<Array<Uri>>,
                 params: FileChooserParams
@@ -410,77 +383,64 @@ class MainActivity : Activity() {
             }
         }
 
-        // 下载交给系统（导出 Excel 等）
+        // 涓嬭浇浜ょ粰绯荤粺锛堝鍑?Excel 绛夛級
         webView.setDownloadListener { url, _, _, _, _ ->
             try {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
             } catch (_: Exception) {
-                Toast.makeText(this, "无法打开下载链接", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "鏃犳硶鎵撳紑涓嬭浇閾炬帴", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    /** 是否业务页（可缓存的那一层），按路径尾匹配，忽略 rev 段变化 */
+    /** 鏄惁涓氬姟椤碉紙鍙紦瀛樼殑閭ｄ竴灞傦級锛屾寜璺緞灏惧尮閰嶏紝蹇界暐 rev 娈靛彉鍖?*/
     private fun isBizPage(url: String): Boolean =
         url.contains("/page/") && url.substringBefore("?").endsWith("hotel_requisition.html")
 
-    // ===== 下拉刷新 =====
+    // ===== 涓嬫媺鍒锋柊 =====
     private fun setupSwipe() {
         swipe.setColorSchemeColors(getColorCompat(R.color.colorPrimary))
         swipe.setOnRefreshListener { trySoftRefresh(0) }
-        // 关键修复：只有业务页处于「最顶部」时才允许下拉刷新。
-        // 由 JS 桥接实时上报 pageAtTop（含内层滚动容器；webView.scrollY 只反映
-        // 文档滚动、内层 div 滚动时恒为 0 会误判在顶部），只要页面没滚到顶就
-        // 返回 true → 刷新手势被抑制，页面内向下滚动/翻页不再误触刷新。
-        swipe.isEnabled = true
+        // 鍏抽敭淇锛氬彧鏈変笟鍔￠〉澶勪簬銆屾渶椤堕儴銆嶆椂鎵嶅厑璁镐笅鎷夊埛鏂般€?        // 鐢?JS 妗ユ帴瀹炴椂涓婃姤 pageAtTop锛堝惈鍐呭眰婊氬姩瀹瑰櫒锛泈ebView.scrollY 鍙弽鏄?        // 鏂囨。婊氬姩銆佸唴灞?div 婊氬姩鏃舵亽涓?0 浼氳鍒ゅ湪椤堕儴锛夛紝鍙椤甸潰娌℃粴鍒伴《灏?        // 杩斿洖 true 鈫?鍒锋柊鎵嬪娍琚姂鍒讹紝椤甸潰鍐呭悜涓嬫粴鍔?缈婚〉涓嶅啀璇Е鍒锋柊銆?        swipe.isEnabled = true
         swipe.setOnChildScrollUpCallback { _, _ -> !pageAtTop }
-        // 加大触发距离：必须「长拉」才刷新，避免轻微下拉就跳屏刷新（默认约 64dp）
-        val triggerPx = (resources.displayMetrics.density * 140).toInt()
+        // 鍔犲ぇ瑙﹀彂璺濈锛氬繀椤汇€岄暱鎷夈€嶆墠鍒锋柊锛岄伩鍏嶈交寰笅鎷夊氨璺冲睆鍒锋柊锛堥粯璁ょ害 64dp锛?        val triggerPx = (resources.displayMetrics.density * 140).toInt()
         swipe.setDistanceToTriggerSync(triggerPx)
     }
 
     /**
-     * 软刷新当前视图（v1.6 加固）。
-     *
-     * 背景：v1.2 及更早用 webView.reload()，会连外壳页（SPA 外壳持有登录态）一起重载
-     * → 重新鉴权 → 跳登录页。v1.3 改为调用业务页的 window.__wlzSoftRefresh，但降级分支
-     * 仍是 location.reload()：App 刚启动、业务页脚本还没执行完时下拉，钩子不存在就会
-     * 走降级 → 依然跳登录。这是「修了但还是会跳登录」的根因。
-     *
-     * 现在的行为：
-     *  - 钩子未就绪（返回 false / 回调为空）→ 每 400ms 重试，最多 5 次（约 2 秒）；
-     *  - 始终不 reload：重试耗尽也只是收起刷新动画并轻提示，绝不触碰外壳页导航。
-     */
+     * 杞埛鏂板綋鍓嶈鍥撅紙v1.6 鍔犲浐锛夈€?     *
+     * 鑳屾櫙锛歷1.2 鍙婃洿鏃╃敤 webView.reload()锛屼細杩炲澹抽〉锛圫PA 澶栧３鎸佹湁鐧诲綍鎬侊級涓€璧烽噸杞?     * 鈫?閲嶆柊閴存潈 鈫?璺崇櫥褰曢〉銆倂1.3 鏀逛负璋冪敤涓氬姟椤电殑 window.__wlzSoftRefresh锛屼絾闄嶇骇鍒嗘敮
+     * 浠嶆槸 location.reload()锛欰pp 鍒氬惎鍔ㄣ€佷笟鍔￠〉鑴氭湰杩樻病鎵ц瀹屾椂涓嬫媺锛岄挬瀛愪笉瀛樺湪灏变細
+     * 璧伴檷绾?鈫?渚濈劧璺崇櫥褰曘€傝繖鏄€屼慨浜嗕絾杩樻槸浼氳烦鐧诲綍銆嶇殑鏍瑰洜銆?     *
+     * 鐜板湪鐨勮涓猴細
+     *  - 閽╁瓙鏈氨缁紙杩斿洖 false / 鍥炶皟涓虹┖锛夆啋 姣?400ms 閲嶈瘯锛屾渶澶?5 娆★紙绾?2 绉掞級锛?     *  - 濮嬬粓涓?reload锛氶噸璇曡€楀敖涔熷彧鏄敹璧峰埛鏂板姩鐢诲苟杞绘彁绀猴紝缁濅笉瑙︾澶栧３椤靛鑸€?     */
     private fun trySoftRefresh(retry: Int) {
         val js = "(function(){try{return (window.__wlzSoftRefresh && window.__wlzSoftRefresh()===true)?'ok':'no';}catch(e){return 'no';}})()"
         webView.evaluateJavascript(js) { res ->
             val ok = res != null && res.contains("ok")
             when {
                 ok -> {
-                    // 数据拉取是异步的，稍等再收动画，避免「转一下就没了」
-                    mainHandler.postDelayed({ swipe.isRefreshing = false }, 600)
+                    // 鏁版嵁鎷夊彇鏄紓姝ョ殑锛岀◢绛夊啀鏀跺姩鐢伙紝閬垮厤銆岃浆涓€涓嬪氨娌′簡銆?                    mainHandler.postDelayed({ swipe.isRefreshing = false }, 600)
                 }
                 retry < 5 -> {
-                    // 业务页尚未就绪（刚启动 / 正在热更新），延迟重试
-                    mainHandler.postDelayed({ trySoftRefresh(retry + 1) }, 400)
+                    // 涓氬姟椤靛皻鏈氨缁紙鍒氬惎鍔?/ 姝ｅ湪鐑洿鏂帮級锛屽欢杩熼噸璇?                    mainHandler.postDelayed({ trySoftRefresh(retry + 1) }, 400)
                 }
                 else -> {
                     swipe.isRefreshing = false
-                    Toast.makeText(this, "页面还在加载，请稍候再拉", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "椤甸潰杩樺湪鍔犺浇锛岃绋嶅€欏啀鎷?, Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
 
-    // ===== 热更新：后台拉取业务页，按 APP_VERSION 判断是否需要更新 =====
+    // ===== 鐑洿鏂帮細鍚庡彴鎷夊彇涓氬姟椤碉紝鎸?APP_VERSION 鍒ゆ柇鏄惁闇€瑕佹洿鏂?=====
     /**
-     * @param notify 是否提示结果（菜单里手动检查时用 true，自动检查静默进行）
+     * @param notify 鏄惁鎻愮ず缁撴灉锛堣彍鍗曢噷鎵嬪姩妫€鏌ユ椂鐢?true锛岃嚜鍔ㄦ鏌ラ潤榛樿繘琛岋級
      *
-     * 更新只在【下次启动】生效，不打断当前操作。
-     */
+     * 鏇存柊鍙湪銆愪笅娆″惎鍔ㄣ€戠敓鏁堬紝涓嶆墦鏂綋鍓嶆搷浣溿€?     */
     private fun checkUpdateAsync(notify: Boolean) {
         val url = bizUrl ?: run {
-            if (notify) toast("尚未获取到页面地址，请稍候再试")
+            if (notify) toast("灏氭湭鑾峰彇鍒伴〉闈㈠湴鍧€锛岃绋嶅€欏啀璇?)
             return
         }
         Thread {
@@ -492,64 +452,44 @@ class MainActivity : Activity() {
                 conn.setRequestProperty("User-Agent", webView.settings.userAgentString)
                 val code = conn.responseCode
                 if (code != HttpURLConnection.HTTP_OK) {
-                    if (notify) mainHandler.post { toast("检查失败（HTTP $code）") }
+                    if (notify) mainHandler.post { toast("妫€鏌ュけ璐ワ紙HTTP $code锛?) }
                     return@Thread
                 }
                 val bytes = conn.inputStream.use { it.readBytes() }
                 val head = String(bytes, 0, minOf(bytes.size, 200_000), Charsets.UTF_8)
-                // v1.7：业务页内嵌 window.WLZ_APP_UPDATE，解析后用于应用内更新提示（独立于页面热更新）
-                val appUp = extractAppUpdate(head)
+                // v1.7锛氫笟鍔￠〉鍐呭祵 window.WLZ_APP_UPDATE锛岃В鏋愬悗鐢ㄤ簬搴旂敤鍐呮洿鏂版彁绀猴紙鐙珛浜庨〉闈㈢儹鏇存柊锛?                val appUp = extractAppUpdate(head)
                 if (appUp != null) {
                     latestAppUpdate = appUp
                     maybePromptAppUpdate()
                 }
                 val ver = PageCache.extractVersion(head)
                 if (ver == null) {
-                    if (notify) mainHandler.post { toast("未能识别页面版本") }
+                    if (notify) mainHandler.post { toast("鏈兘璇嗗埆椤甸潰鐗堟湰") }
                     return@Thread
                 }
                 val updated = PageCache.save(this@MainActivity, bytes, ver)
                 mainHandler.post {
                     when {
-                        updated && notify -> toast("已更新到 $ver，即将自动应用")
-                        updated -> toast("已下载新版 $ver，即将自动应用")
-                        notify -> toast("已是最新（$ver）")
+                        updated && notify -> toast("宸叉洿鏂板埌 $ver锛屼笅娆″惎鍔ㄨ嚜鍔ㄥ簲鐢?)
+                        updated -> toast("宸蹭笅杞芥柊鐗?$ver锛屼笅娆″惎鍔ㄨ嚜鍔ㄥ簲鐢?)
+                        notify -> toast("宸叉槸鏈€鏂帮紙$ver锛?)
                     }
-                    // 下载到新版本：延迟后自动重启应用，等效「退出重开」，
-                    // 让本地已覆盖的新业务页缓存立即生效（登录态在 WebView 持久，重启不跳登录）。
-                    if (updated && !pendingRestart) {
-                        pendingRestart = true
-                        mainHandler.postDelayed({ restartApp() }, 2200)
-                    }
-                }
+                    // 鏇存柊宸插啓鍏ユ湰鍦扮紦瀛橈紱涓嬫椤甸潰璇锋眰鏃?shouldInterceptRequest 鑷姩杩斿洖鏂扮増锛堢瓑鏁?涓嬫鍚姩鐢熸晥"锛夛紝
+                    // 涓嶅湪姝ゅ閲嶅惎 App 鈥斺€?鍐烽噸鍚細鏉€ Activity 閫犳垚椤甸潰闂儊锛屼笖涓?涓嬫鍚姩鐢熸晥"璁捐鐭涚浘銆?                }
             } catch (e: Exception) {
-                if (notify) mainHandler.post { toast("检查更新失败：${e.message ?: "网络异常"}") }
+                if (notify) mainHandler.post { toast("妫€鏌ユ洿鏂板け璐ワ細${e.message ?: "缃戠粶寮傚父"}") }
             }
         }.start()
     }
 
-    /** 自动重启应用：重新走启动流程，加载已覆盖的新业务页缓存（热更新立即生效）。
-       登录态保存在 WebView 持久存储，重启不会跳登录。 */
-    private fun restartApp() {
-        try {
-            val intent = baseContext.packageManager.getLaunchIntentForPackage(baseContext.packageName)
-            intent?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(intent)
-            finish()
-        } catch (_: Exception) {
-            // 兜底：重启失败就提示用户手动退出重开
-            toast("更新已就绪，请退出应用后重新打开")
-        }
-    }
-
-    // ===== 应用内更新提示（v1.7）=====
-    /** 从最新网页字节解析 window.WLZ_APP_UPDATE JSON（含 versionCode/versionName/url/note） */
+    // ===== 搴旂敤鍐呮洿鏂版彁绀猴紙v1.7锛?====
+    /** 浠庢渶鏂扮綉椤靛瓧鑺傝В鏋?window.WLZ_APP_UPDATE JSON锛堝惈 versionCode/versionName/url/note锛?*/
     private fun extractAppUpdate(head: String): JSONObject? {
         val m = Regex("""window\.WLZ_APP_UPDATE\s*=\s*(\{[^\n]*?\});""").find(head) ?: return null
         return try { JSONObject(m.groupValues[1]) } catch (_: Exception) { null }
     }
 
-    /** 业务页声明了比当前更高的 APK 版本时，弹「发现新版本」对话框（每个版本仅提示一次） */
+    /** 涓氬姟椤靛０鏄庝簡姣斿綋鍓嶆洿楂樼殑 APK 鐗堟湰鏃讹紝寮广€屽彂鐜版柊鐗堟湰銆嶅璇濇锛堟瘡涓増鏈粎鎻愮ず涓€娆★級 */
     private fun maybePromptAppUpdate() {
         val up = latestAppUpdate ?: return
         val remoteCode = try { up.getInt("versionCode") } catch (_: Exception) { return }
@@ -563,42 +503,42 @@ class MainActivity : Activity() {
         if (url.isBlank()) return
         mainHandler.post {
             AlertDialog.Builder(this@MainActivity)
-                .setTitle("发现新版本 v$name")
-                .setMessage(if (note.isBlank()) "有新版可用，点击下载更新。" else note)
-                .setPositiveButton("立即下载") { _, _ -> downloadApk(url, name) }
-                .setNegativeButton("稍后", null)
+                .setTitle("鍙戠幇鏂扮増鏈?v$name")
+                .setMessage(if (note.isBlank()) "鏈夋柊鐗堝彲鐢紝鐐瑰嚮涓嬭浇鏇存柊銆? else note)
+                .setPositiveButton("绔嬪嵆涓嬭浇") { _, _ -> downloadApk(url, name) }
+                .setNegativeButton("绋嶅悗", null)
                 .setCancelable(false)
                 .show()
         }
     }
 
-    /** 用系统 DownloadManager 下载 APK 到应用私有下载目录，完成后由广播接收器拉起安装 */
+    /** 鐢ㄧ郴缁?DownloadManager 涓嬭浇 APK 鍒板簲鐢ㄧ鏈変笅杞界洰褰曪紝瀹屾垚鍚庣敱骞挎挱鎺ユ敹鍣ㄦ媺璧峰畨瑁?*/
     private fun downloadApk(url: String, versionName: String) {
         try {
             val dm = downloadManager
                 ?: (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager)
             apkFileName = "wanlongzhou-supply-v$versionName.apk"
             val req = DownloadManager.Request(Uri.parse(url)).apply {
-                setTitle("万龙洲供应链 App v$versionName")
-                setDescription("正在下载更新包…")
+                setTitle("涓囬緳娲蹭緵搴旈摼 App v$versionName")
+                setDescription("姝ｅ湪涓嬭浇鏇存柊鍖呪€?)
                 setMimeType("application/vnd.android.package-archive")
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setDestinationInExternalFilesDir(this@MainActivity, Environment.DIRECTORY_DOWNLOADS, apkFileName)
             }
             apkDownloadId = dm.enqueue(req)
-            Toast.makeText(this, "开始下载更新包，完成后自动提示安装", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "寮€濮嬩笅杞芥洿鏂板寘锛屽畬鎴愬悗鑷姩鎻愮ず瀹夎", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "下载失败：${e.message ?: "未知错误"}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "涓嬭浇澶辫触锛?{e.message ?: "鏈煡閿欒"}", Toast.LENGTH_LONG).show()
         }
     }
 
-    /** 下载完成后拉起系统安装器（FileProvider 暴露应用私有下载目录，兼容 Android 7+） */
+    /** 涓嬭浇瀹屾垚鍚庢媺璧风郴缁熷畨瑁呭櫒锛團ileProvider 鏆撮湶搴旂敤绉佹湁涓嬭浇鐩綍锛屽吋瀹?Android 7+锛?*/
     private fun promptInstall() {
         try {
             val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return
             val file = File(dir, apkFileName)
             if (!file.exists()) {
-                Toast.makeText(this, "安装包未找到", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "瀹夎鍖呮湭鎵惧埌", Toast.LENGTH_SHORT).show()
                 return
             }
             val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
@@ -611,13 +551,13 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             Toast.makeText(
                 this,
-                "无法安装：${e.message ?: "未知错误"}（请到设置中允许「安装未知应用」）",
+                "鏃犳硶瀹夎锛?{e.message ?: "鏈煡閿欒"}锛堣鍒拌缃腑鍏佽銆屽畨瑁呮湭鐭ュ簲鐢ㄣ€嶏級",
                 Toast.LENGTH_LONG
             ).show()
         }
     }
 
-    /** JS 桥：网页登录后可调用 window.__wlzApp.checkUpdate() 主动触发检测 */
+    /** JS 妗ワ細缃戦〉鐧诲綍鍚庡彲璋冪敤 window.__wlzApp.checkUpdate() 涓诲姩瑙﹀彂妫€娴?*/
     inner class WlzAppBridge {
         @JavascriptInterface
         fun checkUpdate() {
@@ -628,7 +568,7 @@ class MainActivity : Activity() {
     private fun showNetworkError(desc: String?) {
         val v = errorView
         v.findViewById<TextView>(R.id.errorText).text =
-            if (isOnline()) (desc ?: "页面加载失败") else getString(R.string.net_error_msg)
+            if (isOnline()) (desc ?: "椤甸潰鍔犺浇澶辫触") else getString(R.string.net_error_msg)
         v.visibility = View.VISIBLE
         splash.visibility = View.GONE
         progress.visibility = View.GONE
@@ -650,15 +590,15 @@ class MainActivity : Activity() {
         }
     }
 
-    // ===== 原生打印（A4）=====
+    // ===== 鍘熺敓鎵撳嵃锛圓4锛?====
     private fun printCurrentPage() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
-            toast("系统版本过低，不支持打印")
+            toast("绯荤粺鐗堟湰杩囦綆锛屼笉鏀寔鎵撳嵃")
             return
         }
         val pm = getSystemService(Context.PRINT_SERVICE) as? PrintManager
         if (pm == null) {
-            toast("当前设备不支持打印")
+            toast("褰撳墠璁惧涓嶆敮鎸佹墦鍗?)
             return
         }
         @Suppress("DEPRECATION")
@@ -671,7 +611,7 @@ class MainActivity : Activity() {
         pm.print(getString(R.string.print_job_name), adapter, attrs)
     }
 
-    // ===== 菜单 =====
+    // ===== 鑿滃崟 =====
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, MENU_REFRESH, 0, R.string.menu_refresh)
         menu.add(0, MENU_CHECK_UPDATE, 0, R.string.menu_check_update)
@@ -702,13 +642,13 @@ class MainActivity : Activity() {
             }
             MENU_RESET_URL -> {
                 prefs.edit().putString(KEY_URL, DEFAULT_URL).apply()
-                toast("已恢复默认地址")
+                toast("宸叉仮澶嶉粯璁ゅ湴鍧€")
                 loadHome()
                 true
             }
             MENU_CLEAR_CACHE -> {
                 PageCache.clear(this)
-                toast("本地页面缓存已清除，下次启动重新下载")
+                toast("鏈湴椤甸潰缂撳瓨宸叉竻闄わ紝涓嬫鍚姩閲嶆柊涓嬭浇")
                 loadHome()
                 true
             }
@@ -717,30 +657,28 @@ class MainActivity : Activity() {
     }
 
     /**
-     * 清缓存重新加载。
-     * 注意：这里刻意【不清 localStorage】，否则会连同草稿一起清掉。
-     */
+     * 娓呯紦瀛橀噸鏂板姞杞姐€?     * 娉ㄦ剰锛氳繖閲屽埢鎰忋€愪笉娓?localStorage銆戯紝鍚﹀垯浼氳繛鍚岃崏绋夸竴璧锋竻鎺夈€?     */
     private fun clearCacheAndReload() {
         webView.clearCache(true)
         webView.clearFormData()
         loadHome()
-        toast("已清缓存并重新加载")
+        toast("宸叉竻缂撳瓨骞堕噸鏂板姞杞?)
     }
 
-    /** 服务器地址配置：后期迁 NAS 时改这里即可，不用重新打包 App */
+    /** 鏈嶅姟鍣ㄥ湴鍧€閰嶇疆锛氬悗鏈熻縼 NAS 鏃舵敼杩欓噷鍗冲彲锛屼笉鐢ㄩ噸鏂版墦鍖?App */
     private fun showUrlDialog() {
         val input = EditText(this)
         input.setText(homeUrl)
         input.setSingleLine(true)
 
         AlertDialog.Builder(this)
-            .setTitle("服务器地址")
-            .setMessage("后期迁到 NAS 后，把这里改成 NAS 上的访问地址即可，App 无需重新打包。")
+            .setTitle("鏈嶅姟鍣ㄥ湴鍧€")
+            .setMessage("鍚庢湡杩佸埌 NAS 鍚庯紝鎶婅繖閲屾敼鎴?NAS 涓婄殑璁块棶鍦板潃鍗冲彲锛孉pp 鏃犻渶閲嶆柊鎵撳寘銆?)
             .setView(input)
-            .setPositiveButton("保存并打开") { _, _ ->
+            .setPositiveButton("淇濆瓨骞舵墦寮€") { _, _ ->
                 val raw = input.text.toString().trim()
                 if (raw.isBlank()) {
-                    toast("地址不能为空")
+                    toast("鍦板潃涓嶈兘涓虹┖")
                     return@setPositiveButton
                 }
                 val finalUrl =
@@ -749,11 +687,11 @@ class MainActivity : Activity() {
                 webView.clearCache(true)
                 loadHome()
             }
-            .setNegativeButton("取消", null)
+            .setNegativeButton("鍙栨秷", null)
             .show()
     }
 
-    // ===== 返回键：优先网页内回退；已到首页则双击退出 =====
+    // ===== 杩斿洖閿細浼樺厛缃戦〉鍐呭洖閫€锛涘凡鍒伴椤靛垯鍙屽嚮閫€鍑?=====
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             if (webView.canGoBack()) {
@@ -765,7 +703,7 @@ class MainActivity : Activity() {
                 finish()
             } else {
                 lastBackAt = now
-                toast("再按一次退出")
+                toast("鍐嶆寜涓€娆￠€€鍑?)
             }
             return true
         }
@@ -806,10 +744,8 @@ class MainActivity : Activity() {
 
     companion object {
         /**
-         * 外壳页地址（线上系统的入口）。
-         * 注意：这里必须是 workbuddy.link 的页面地址，不能改成静态业务页地址
-         * —— 登录态与数据库 SDK 由外壳页注入，直接用静态页会导致系统不可用。
-         */
+         * 澶栧３椤靛湴鍧€锛堢嚎涓婄郴缁熺殑鍏ュ彛锛夈€?         * 娉ㄦ剰锛氳繖閲屽繀椤绘槸 workbuddy.link 鐨勯〉闈㈠湴鍧€锛屼笉鑳芥敼鎴愰潤鎬佷笟鍔￠〉鍦板潃
+         * 鈥斺€?鐧诲綍鎬佷笌鏁版嵁搴?SDK 鐢卞澹抽〉娉ㄥ叆锛岀洿鎺ョ敤闈欐€侀〉浼氬鑷寸郴缁熶笉鍙敤銆?         */
         private const val DEFAULT_URL = "https://www.workbuddy.link/p/1n4Jb5OioGpFwab2YHFXTs"
         private const val PREFS = "wlz_supply"
         private const val KEY_URL = "server_url"

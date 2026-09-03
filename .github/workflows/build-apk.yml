@@ -64,5 +64,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: 万龙洲供应链 App ${{ github.ref_name }}
-          body: 自动构建的 Debug 安装包（应用内更新可用）
-          files: app/build/outputs/apk/debug/app-debug.apk
+          body: 自动构建的 Release 安装包（固定签名，可无缝覆盖升级；应用内更新可用）
+          files: app/build/outputs/apk/release/app-release.apk

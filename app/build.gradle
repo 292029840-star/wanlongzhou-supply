@@ -15,8 +15,27 @@ android {
         versionName "1.7"
     }
 
+    // 固定签名：CI 从 repo Secret 解码 PKCS12 keystore，所有版本签名一致 → 可无缝覆盖升级。
+    // 本地开发无 KEYSTORE_FILE 环境变量时跳过签名（不影响 assembleDebug）。
+    def ksFile = System.getenv("KEYSTORE_FILE")
+    def ksPass = System.getenv("WUZ_STORE_PASSWORD") ?: ""
+    signingConfigs {
+        release {
+            if (ksFile != null && ksFile != "") {
+                storeFile file(ksFile)
+                storeType "PKCS12"
+                storePassword ksPass
+                keyAlias "wlz-release"
+                keyPassword ksPass
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (ksFile != null && ksFile != "") {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

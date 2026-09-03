@@ -186,17 +186,14 @@ class MainActivity : Activity() {
                 view: WebView,
                 request: WebResourceRequest
             ): WebResourceResponse? {
+                // 业务页一律走网络，不做本地拦截。
+                // 本地 PageCache 仅用于「秒开」，但外壳页(SHELL)装载业务页时如果被拦截返回缓存，
+                // 有可能返回旧/坏页面导致白屏；为根治「有 Logo 但业务页白屏」，这里不拦截，
+                // 让外壳页 100% 拿到最新业务页。PageCache 仍保留供 checkUpdateAsync 后台缓存/秒开。
                 val url = request.url.toString()
                 if (!isBizPage(url)) return null
-                bizUrl = url
-                val cached = PageCache.bytes(this@MainActivity)
-                if (cached != null) {
-                    return WebResourceResponse(
-                        "text/html", "utf-8",
-                        ByteArrayInputStream(cached)
-                    )
-                }
-                return null
+                bizUrl = url // 记录真实地址，供热更新/更新检测用
+                return null // 始终走网络（不返回缓存）
             }
 
             override fun shouldOverrideUrlLoading(
@@ -222,10 +219,11 @@ class MainActivity : Activity() {
                 swipe.isRefreshing = false
                 splash.postDelayed({ splash.visibility = View.GONE }, 250)
                 checkUpdateAsync(notify = false)
+                // 业务页才注入（滚动探测 + 隐藏平台浮窗）
                 if (isBizPage(url)) {
                     webView.evaluateJavascript(SCROLL_JS, null)
+                    webView.evaluateJavascript(HIDE_FAB_JS, null)
                 }
-                webView.evaluateJavascript(HIDE_FAB_JS, null)
             }
 
             override fun onReceivedError(

@@ -47,18 +47,24 @@ jobs:
       - name: 赋予 gradlew 执行权限
         run: chmod +x gradlew
 
-      - name: 构建 Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+      # 固定签名：从 repo Secret 解码 PKCS12 keystore，所有版本签名一致 → 可无缝覆盖升级
+      - name: 解码签名密钥并构建 Release APK
+        run: |
+          echo "${{ secrets.WUZ_KEYSTORE_B64 }}" | base64 -d > wlz-release.p12
+          export KEYSTORE_FILE="$(pwd)/wlz-release.p12"
+          ./gradlew assembleRelease --no-daemon --stacktrace
+        env:
+          WUZ_STORE_PASSWORD: ${{ secrets.WUZ_STORE_PASSWORD }}
 
       - name: 上传 APK 产物
         uses: actions/upload-artifact@v4
         with:
-          name: wanlongzhou-supply-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: wanlongzhou-supply-release
+          path: app/build/outputs/apk/release/app-release.apk
           retention-days: 30
 
       # 打 tag 时自动建 GitHub Release 并附上 APK，供应用内更新一键下载
-      # 下载直链：https://github.com/<repo>/releases/download/<tag>/app-debug.apk
+      # 下载直链：https://github.com/<repo>/releases/download/<tag>/app-release.apk
       - name: 创建 Release 并附 APK
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2

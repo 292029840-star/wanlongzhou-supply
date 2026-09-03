@@ -29,6 +29,10 @@ android {
     kotlinOptions {
         jvmTarget = '17'
     }
+    // AGP 8.x 默认不生成 BuildConfig；v1.7 应用内更新需要 BuildConfig.VERSION_CODE
+    buildFeatures {
+        buildConfig true
+    }
 }
 
 dependencies {

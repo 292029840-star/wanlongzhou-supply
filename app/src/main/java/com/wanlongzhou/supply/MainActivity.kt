@@ -3,22 +3,28 @@ package com.wanlongzhou.supply
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.print.PrintAttributes
 import android.print.PrintManager
+import android.util.Log
 import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
 import android.webkit.ValueCallback
@@ -27,58 +33,42 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
-import android.webkit.JavascriptInterface
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import android.app.DownloadManager
-import android.content.BroadcastReceiver
-import android.content.IntentFilter
-import android.os.Environment
-import androidx.core.content.FileProvider
 import org.json.JSONObject
 
-/**
- *                    ?                ? *
- *                                                                                                     
- *     /        100%                                ? *
- *   1.     WebView           ?                ?/         ? *   2.     localStorage       ?                   ? *   3.           ?+     ?   ?                       ? *   4.     /        /     ?/        /           ?          ? *
- *                               ?PageCache                     
- *                4KB    ?SDK                     
- *            +       540KB         token              
- *                                   ? */
+/** 万龙洲供应链申购系统 - 安卓壳（准原生增强版） */
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
-
-    /**                       ?JS                      
-     *  SwipeRefreshLayout                    */
-    private var pageAtTop = true
     private lateinit var progress: ProgressBar
     private lateinit var swipe: SwipeRefreshLayout
     private lateinit var splash: View
-    private lateinit var errView: View
+    private lateinit var errorView: View
 
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
-    /**                rev        ?WebView                    */
+    /** 业务页真实地址（含 rev 段），供后台更新用 */
     @Volatile
     private var bizUrl: String? = null
 
-    /**             ?APK       checkUpdateAsync                                */
+    /** 业务页声明的最新 APK 元信息（应用内更新用） */
     private var latestAppUpdate: JSONObject? = null
     private var apkDownloadId: Long = -1L
     private var apkFileName: String = ""
     private var downloadManager: DownloadManager? = null
-    /**                          */
+
+    /** 下载完成广播接收器：自动拉起安装 */
     private val apkDownloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
             if (intent?.action == DownloadManager.ACTION_DOWNLOAD_COMPLETE &&
@@ -91,10 +81,9 @@ class MainActivity : Activity() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
-
     private var lastBackAt = 0L
 
-    /**                   ?App                 */
+    /** 当前生效的业务地址（可在 App 内改，默认取线上地址） */
     private val homeUrl: String
         get() = prefs.getString(KEY_URL, DEFAULT_URL)
             ?.takeIf { it.isNotBlank() } ?: DEFAULT_URL
@@ -107,21 +96,22 @@ class MainActivity : Activity() {
         progress = findViewById(R.id.progress)
         swipe = findViewById(R.id.swipe)
         splash = findViewById(R.id.splash)
-        errView = findViewById(R.id.errorView)
+        errorView = findViewById(R.id.errorView)
 
         applySystemBars()
         setupWebView()
         setupSwipe()
 
-        //                          ?try-catch          ?                     ?        //                                         ebView         ?        try {
+        // 应用内更新依赖的下载管理器：包 try-catch，避免个别机型异常导致冷启动闪退
+        try {
             downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             registerReceiver(apkDownloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
         } catch (e: Exception) {
-            android.util.Log.w("WlzApp", "涓嬭浇绠＄悊鍣ㄥ垵濮嬪寲澶辫触锛屽簲鐢ㄥ唴鏇存柊鏆備笉鍙 敤: ${e.message}")
+            Log.w("WlzApp", "下载管理器初始化失败，应用内更新暂不可用: ${e.message}")
         }
 
         findViewById<Button>(R.id.btnRetry).setOnClickListener {
-            errView.visibility = View.GONE
+            errorView.visibility = View.GONE
             splash.visibility = View.VISIBLE
             loadHome()
         }
@@ -134,7 +124,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /**       /                         */
+    /** 状态栏 / 导航栏统一为品牌色 */
     private fun applySystemBars() {
         window.statusBarColor = getColorCompat(R.color.colorPrimaryDark)
         window.navigationBarColor = getColorCompat(R.color.colorPrimaryDark)
@@ -144,7 +134,189 @@ class MainActivity : Activity() {
     private fun getColorCompat(id: Int): Int =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) getColor(id) else resources.getColor(id)
 
-    /**                                      ?scroll     ?     *      ?window.scrollY                ?scrollTop             ?     *                           SwipeRefreshLayout              ?     *       ebView.scrollY                    ?div        ?0 ?     *                    ?                                */
+    private var pageAtTop = true
+
+    /** 主地址带时间戳加载，确保每次拿到最新外壳页（业务页走本地缓存） */
+    private fun loadHome() {
+        val url = homeUrl
+        val sep = if (url.contains("?")) "&" else "?"
+        errorView.visibility = View.GONE
+        splash.visibility = View.VISIBLE
+        webView.loadUrl(url + sep + "_t=" + System.currentTimeMillis())
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupWebView() {
+        val s = webView.settings
+
+        s.javaScriptEnabled = true
+
+        // 关键 1：禁用网络缓存，根治「新单据闪现即消失 / 状态回退」
+        s.cacheMode = WebSettings.LOAD_NO_CACHE
+
+        // 关键 2：启用 localStorage（草稿机制依赖，关掉会丢草稿）
+        s.domStorageEnabled = true
+        s.databaseEnabled = true
+
+        s.useWideViewPort = true
+        s.loadWithOverviewMode = true
+        s.setSupportZoom(false)
+        s.builtInZoomControls = false
+        s.displayZoomControls = false
+        s.javaScriptCanOpenWindowsAutomatically = true
+        s.mediaPlaybackRequiresUserGesture = false
+        s.loadsImagesAutomatically = true
+        s.defaultTextEncodingName = "UTF-8"
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            s.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        }
+        s.userAgentString = s.userAgentString + " WLZSupply/1.0"
+
+        CookieManager.getInstance().setAcceptCookie(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+        }
+
+        webView.addJavascriptInterface(WbScrollBridge(), "__wbScroll")
+        webView.addJavascriptInterface(WlzAppBridge(), "__wlzApp")
+
+        webView.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(
+                view: WebView,
+                request: WebResourceRequest
+            ): WebResourceResponse? {
+                val url = request.url.toString()
+                if (!isBizPage(url)) return null
+                bizUrl = url
+                val cached = PageCache.bytes(this@MainActivity)
+                if (cached != null) {
+                    return WebResourceResponse(
+                        "text/html", "utf-8",
+                        ByteArrayInputStream(cached)
+                    )
+                }
+                return null
+            }
+
+            override fun shouldOverrideUrlLoading(
+                view: WebView,
+                request: WebResourceRequest
+            ): Boolean {
+                val url = request.url.toString()
+                return when {
+                    url.startsWith("http://") || url.startsWith("https://") ||
+                            url.startsWith("about:") -> false
+                    else -> {
+                        try {
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        } catch (e: Exception) {
+                        }
+                        true
+                    }
+                }
+            }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                progress.visibility = View.GONE
+                swipe.isRefreshing = false
+                splash.postDelayed({ splash.visibility = View.GONE }, 250)
+                checkUpdateAsync(notify = false)
+                if (isBizPage(url)) {
+                    webView.evaluateJavascript(SCROLL_JS, null)
+                }
+                webView.evaluateJavascript(HIDE_FAB_JS, null)
+            }
+
+            override fun onReceivedError(
+                view: WebView,
+                request: WebResourceRequest,
+                error: android.webkit.WebResourceError?
+            ) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                    request.isForMainFrame && !isBizPage(request.url.toString())
+                ) {
+                    showNetworkError(error?.description?.toString())
+                }
+            }
+        }
+
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(view: WebView, newProgress: Int) {
+                progress.progress = newProgress
+                progress.visibility = if (newProgress < 100) View.VISIBLE else View.GONE
+            }
+
+            // 必须处理 alert / confirm / prompt，否则网页弹窗不显示，confirm 卡死流程
+            override fun onJsAlert(
+                view: WebView, url: String, message: String, result: JsResult
+            ): Boolean {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("提示")
+                    .setMessage(message)
+                    .setPositiveButton("确定") { _, _ -> result.confirm() }
+                    .setCancelable(false)
+                    .show()
+                return true
+            }
+
+            override fun onJsConfirm(
+                view: WebView, url: String, message: String, result: JsResult
+            ): Boolean {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("确认")
+                    .setMessage(message)
+                    .setPositiveButton("确定") { _, _ -> result.confirm() }
+                    .setNegativeButton("取消") { _, _ -> result.cancel() }
+                    .setCancelable(false)
+                    .show()
+                return true
+            }
+
+            override fun onJsPrompt(
+                view: WebView, url: String, message: String,
+                defaultValue: String, result: JsPromptResult
+            ): Boolean {
+                val input = EditText(this@MainActivity)
+                input.setText(defaultValue ?: "")
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("请输入")
+                    .setMessage(message)
+                    .setView(input)
+                    .setPositiveButton("确定") { _, _ -> result.confirm(input.text.toString()) }
+                    .setNegativeButton("取消") { _, _ -> result.cancel() }
+                    .setCancelable(false)
+                    .show()
+                return true
+            }
+
+            override fun onShowFileChooser(
+                webView: WebView,
+                callback: ValueCallback<Array<Uri>>,
+                params: FileChooserParams
+            ): Boolean {
+                filePathCallback?.onReceiveValue(null)
+                filePathCallback = callback
+                return try {
+                    startActivityForResult(params.createIntent(), REQ_FILE)
+                    true
+                } catch (e: Exception) {
+                    filePathCallback = null
+                    false
+                }
+            }
+        }
+
+        webView.setDownloadListener { url, _, _, _, _ ->
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            } catch (e: Exception) {
+                Toast.makeText(this, "无法打开下载链接", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /** 注入的滚动探测脚本：实时上报「是否在顶部」，供下拉刷新判断 */
     private val SCROLL_JS = """
         (function(){
           function report(e){
@@ -159,7 +331,7 @@ class MainActivity : Activity() {
         })();
     """.trimIndent()
 
-    /**     WorkBuddy               WorkBuddy              v1.4   ?                       HTML                 ?chrome          ?JS     ?       v1.3           class     'workbuddy'                    ?body/          ? ?    ?                        WorkBuddy /                            class                  */
+    /** 隐藏平台「回WorkBuddy继续聊」浮窗（只按文本命中，不宽泛匹配 class） */
     private val HIDE_FAB_JS = """
         (function(){
           function hideEl(el){ if(el && el.style){ el.style.display='none'; el.style.visibility='hidden'; el.style.pointerEvents='none'; } }
@@ -171,13 +343,13 @@ class MainActivity : Activity() {
                 var el = nodes[i];
                 var txt = (el.innerText||el.textContent||'').trim();
                 var cls = (el.className||'').toString();
-                if(txt && (txt.indexOf('鍥濿orkBuddy')>=0 || txt.indexOf('缁х画鑱?)>=0)){ hideEl(el); }
+                if(txt && (txt.indexOf('回WorkBuddy')>=0 || txt.indexOf('继续聊')>=0)){ hideEl(el); }
                 else if(clsRe.test(cls)){ hideEl(el); }
               }
               var links = document.querySelectorAll('a[href*="workbuddy"]');
               for(var j=0;j<links.length;j++){
                 var l = links[j], lt = (l.innerText||'').trim();
-                if(lt.indexOf('鍥濿orkBuddy')>=0 || lt.indexOf('缁х画鑱?)>=0){ hideEl(l); }
+                if(lt.indexOf('回WorkBuddy')>=0 || lt.indexOf('继续聊')>=0){ hideEl(l); }
               }
             }catch(e){}
           }
@@ -195,7 +367,7 @@ class MainActivity : Activity() {
         })();
     """.trimIndent()
 
-    /** JS                          */
+    /** JS 桥：页面上报是否在页面顶部 */
     inner class WbScrollBridge {
         @JavascriptInterface
         fun atTop(v: Int) {
@@ -203,244 +375,40 @@ class MainActivity : Activity() {
         }
     }
 
-    /**                                                         */
-    private fun loadHome() {
-        val url = homeUrl
-        val sep = if (url.contains("?")) "&" else "?"
-        errView.visibility = View.GONE
-        splash.visibility = View.VISIBLE
-        webView.loadUrl(url + sep + "_t=" + System.currentTimeMillis())
-    }
-
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun setupWebView() {
-        val s = webView.settings
-
-        s.javaScriptEnabled = true
-
-        // =====     1    ?WebView        =====
-        //     WebView                                       ?        //                                              ?        //     Chrome  ?iOS Safari                              ?        s.cacheMode = WebSettings.LOAD_NO_CACHE
-
-        // =====     2       ?localStorage =====
-        //                                     ?        s.domStorageEnabled = true
-        s.databaseEnabled = true
-
-        s.useWideViewPort = true
-        s.loadWithOverviewMode = true
-        s.setSupportZoom(false)
-        s.builtInZoomControls = false
-        s.displayZoomControls = false
-        s.javaScriptCanOpenWindowsAutomatically = true
-        s.mediaPlaybackRequiresUserGesture = false
-        s.loadsImagesAutomatically = true
-        s.defaultTextEncodingName = "UTF-8"
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            //     https        http              NAS     http ?            s.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-        }
-        s.userAgentString = s.userAgentString + " WLZSupply/1.0"
-
-        CookieManager.getInstance().setAcceptCookie(true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
-        }
-
-        // JS                                            ?        webView.addJavascriptInterface(WbScrollBridge(), "__wbScroll")
-        webView.addJavascriptInterface(WlzAppBridge(), "__wlzApp")
-
-        webView.webViewClient = object : WebViewClient() {
-
-            /**
-             *                                       
-             *                                         ?             *
-             *                hotel_requisition.html   ?             *                                       ?             */
-            override fun shouldInterceptRequest(
-                view: WebView,
-                request: WebResourceRequest
-            ): WebResourceResponse? {
-                val url = request.url.toString()
-                if (!isBizPage(url)) return null
-
-                bizUrl = url
-
-                val cached = PageCache.bytes(this@MainActivity)
-                if (cached != null) {
-                    return WebResourceResponse(
-                        "text/html", "utf-8",
-                        ByteArrayInputStream(cached)
-                    )
-                }
-                return null // 鏃犵紦瀛?鈫?璧扮綉缁滐紝鍚庡彴浼氱珛鍒昏ˉ瀛?            }
-
-            override fun shouldOverrideUrlLoading(
-                view: WebView,
-                request: WebResourceRequest
-            ): Boolean {
-                val url = request.url.toString()
-                return when {
-                    url.startsWith("http://") || url.startsWith("https://") ||
-                            url.startsWith("about:") -> false
-                    else -> {
-                        try {
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        } catch (_: Exception) {
-                        }
-                        true
-                    }
-                }
-            }
-
-            override fun onPageFinished(view: WebView, url: String) {
-                progress.visibility = View.GONE
-                swipe.isRefreshing = false
-                //                                   ?                splash.postDelayed({ splash.visibility = View.GONE }, 250)
-                //                                ?                checkUpdateAsync(notify = false)
-                //                                        
-                if (isBizPage(url)) {
-                    webView.evaluateJavascript(SCROLL_JS, null)
-                }
-                // v1.3           WorkBuddy                                 ?                webView.evaluateJavascript(HIDE_FAB_JS, null)
-            }
-
-            //                                              
-            override fun onReceivedError(
-                view: WebView,
-                request: WebResourceRequest,
-                error: android.webkit.WebResourceError?
-            ) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                    request.isForMainFrame && !isBizPage(request.url.toString())
-                ) {
-                    showNetworkError(error?.description?.toString())
-                }
-            }
-        }
-
-        webView.webChromeClient = object : WebChromeClient() {
-
-            override fun onProgressChanged(view: WebView, newProgress: Int) {
-                progress.progress = newProgress
-                progress.visibility = if (newProgress < 100) View.VISIBLE else View.GONE
-            }
-
-            //        alert / confirm / prompt ?            //                    ?WebView          
-            // confirm                            ?            override fun onJsAlert(
-                view: WebView, url: String, message: String, result: JsResult
-            ): Boolean {
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle("鎻愮ず")
-                    .setMessage(message)
-                    .setPositiveButton("纭 畾") { _, _ -> result.confirm() }
-                    .setCancelable(false)
-                    .show()
-                return true
-            }
-
-            override fun onJsConfirm(
-                view: WebView, url: String, message: String, result: JsResult
-            ): Boolean {
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle("纭  ")
-                    .setMessage(message)
-                    .setPositiveButton("纭 畾") { _, _ -> result.confirm() }
-                    .setNegativeButton("鍙栨秷") { _, _ -> result.cancel() }
-                    .setCancelable(false)
-                    .show()
-                return true
-            }
-
-            override fun onJsPrompt(
-                view: WebView, url: String, message: String,
-                defaultValue: String, result: JsPromptResult
-            ): Boolean {
-                val input = EditText(this@MainActivity)
-                input.setText(defaultValue ?: "")
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle("璇疯緭鍏?)
-                    .setMessage(message)
-                    .setView(input)
-                    .setPositiveButton("纭 畾") { _, _ -> result.confirm(input.text.toString()) }
-                    .setNegativeButton("鍙栨秷") { _, _ -> result.cancel() }
-                    .setCancelable(false)
-                    .show()
-                return true
-            }
-
-            //                              ?            override fun onShowFileChooser(
-                webView: WebView,
-                callback: ValueCallback<Array<Uri>>,
-                params: FileChooserParams
-            ): Boolean {
-                filePathCallback?.onReceiveValue(null)
-                filePathCallback = callback
-                return try {
-                    startActivityForResult(params.createIntent(), REQ_FILE)
-                    true
-                } catch (_: Exception) {
-                    filePathCallback = null
-                    false
-                }
-            }
-        }
-
-        //              ?Excel    
-        webView.setDownloadListener { url, _, _, _, _ ->
-            try {
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            } catch (_: Exception) {
-                Toast.makeText(this, "鏃犳硶鎵撳紑涓嬭浇閾炬帴", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    /**                                      rev     */
+    /** 是否业务页（可缓存的那一层），按路径尾匹配 */
     private fun isBizPage(url: String): Boolean =
         url.contains("/page/") && url.substringBefore("?").endsWith("hotel_requisition.html")
 
-    // =====        =====
+    // ===== 下拉刷新 =====
     private fun setupSwipe() {
         swipe.setColorSchemeColors(getColorCompat(R.color.colorPrimary))
         swipe.setOnRefreshListener { trySoftRefresh(0) }
-        //                                        ?        //  ?JS           pageAtTop              ebView.scrollY     ?        //           ?div        ?0                          ?        //     true  ?                      ?             ?        swipe.isEnabled = true
+        swipe.isEnabled = true
         swipe.setOnChildScrollUpCallback { _, _ -> !pageAtTop }
-        //                                                   64dp ?        val triggerPx = (resources.displayMetrics.density * 140).toInt()
+        val triggerPx = (resources.displayMetrics.density * 140).toInt()
         swipe.setDistanceToTriggerSync(triggerPx)
     }
 
-    /**
-     *             v1.6       ?     *
-     *      1.2        webView.reload()           PA                   ?     *  ?        ?        1.3              window.__wlzSoftRefresh         
-     *     location.reload()  pp                                       
-     *     ? ?                                   ?     *
-     *          
-     *  -              false /            ?400ms        ?5     ?2     ?     *  -     ?reload                                            ?     */
+    /** 软刷新当前视图：始终不 reload，避免外壳页重新鉴权跳登录 */
     private fun trySoftRefresh(retry: Int) {
         val js = "(function(){try{return (window.__wlzSoftRefresh && window.__wlzSoftRefresh()===true)?'ok':'no';}catch(e){return 'no';}})()"
         webView.evaluateJavascript(js) { res ->
             val ok = res != null && res.contains("ok")
             when {
-                ok -> {
-                    //                                        ?                    mainHandler.postDelayed({ swipe.isRefreshing = false }, 600)
-                }
-                retry < 5 -> {
-                    //                 ?/                 ?                    mainHandler.postDelayed({ trySoftRefresh(retry + 1) }, 400)
-                }
+                ok -> mainHandler.postDelayed({ swipe.isRefreshing = false }, 600)
+                retry < 5 -> mainHandler.postDelayed({ trySoftRefresh(retry + 1) }, 400)
                 else -> {
                     swipe.isRefreshing = false
-                    Toast.makeText(this, "椤甸潰杩樺湪鍔犺浇锛岃 绋嶅€欏啀鎷?, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "页面还在加载，请稍候再拉", Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
 
-    // =====                    ?APP_VERSION             ?=====
-    /**
-     * @param notify                         ?true               
-     *
-     *                                 ?     */
+    // ===== 热更新：后台拉取业务页，按 APP_VERSION 判断是否更新 =====
     private fun checkUpdateAsync(notify: Boolean) {
         val url = bizUrl ?: run {
-            if (notify) toast("灏氭湭鑾峰彇鍒伴〉闈㈠湴鍧€锛岃 绋嶅€欏啀璇?)
+            if (notify) toast("尚未获取到页面地址，请稍候再试")
             return
         }
         Thread {
@@ -452,47 +420,46 @@ class MainActivity : Activity() {
                 conn.setRequestProperty("User-Agent", webView.settings.userAgentString)
                 val code = conn.responseCode
                 if (code != HttpURLConnection.HTTP_OK) {
-                    if (notify) mainHandler.post { toast("妫€鏌ュけ璐ワ紙HTTP $code锛?) }
+                    if (notify) mainHandler.post { toast("检查失败（HTTP $code）") }
                     return@Thread
                 }
                 val bytes = conn.inputStream.use { it.readBytes() }
                 val head = String(bytes, 0, minOf(bytes.size, 200_000), Charsets.UTF_8)
-                // v1.7          window.WLZ_APP_UPDATE                                  ?                val appUp = extractAppUpdate(head)
+                val appUp = extractAppUpdate(head)
                 if (appUp != null) {
                     latestAppUpdate = appUp
                     maybePromptAppUpdate()
                 }
                 val ver = PageCache.extractVersion(head)
                 if (ver == null) {
-                    if (notify) mainHandler.post { toast("鏈 兘璇嗗埆椤甸潰鐗堟湰") }
+                    if (notify) mainHandler.post { toast("未能识别页面版本") }
                     return@Thread
                 }
                 val updated = PageCache.save(this@MainActivity, bytes, ver)
                 mainHandler.post {
                     when {
-                        updated && notify -> toast("宸叉洿鏂板埌 $ver锛屼笅娆″惎鍔ㄨ嚜鍔ㄥ簲鐢?)
-                        updated -> toast("宸蹭笅杞芥柊鐗?$ver锛屼笅娆″惎鍔ㄨ嚜鍔ㄥ簲鐢?)
-                        notify -> toast("宸叉槸鏈€鏂帮紙$ver锛?)
+                        updated && notify -> toast("已更新到 $ver，下次启动自动应用")
+                        updated -> toast("已下载新版 $ver，下次启动自动应用")
+                        notify -> toast("已是最新（$ver）")
                     }
-                    //                          ?shouldInterceptRequest              ?         "   
-                    //           App    ?         Activity              ?         "       ?                }
+                    // 更新已写入本地缓存，下次请求时 shouldInterceptRequest 自动返回新版，不在此时重启应用（会闪烁）
+                }
             } catch (e: Exception) {
-                if (notify) mainHandler.post { toast("妫€鏌ユ洿鏂板け璐ワ細${e.message ?: "缃戠粶寮傚父"}") }
+                if (notify) mainHandler.post { toast("检查更新失败：${e.message ?: "网络异常"}") }
             }
         }.start()
     }
 
-    // =====             v1.7 ?====
-    /**              ?window.WLZ_APP_UPDATE JSON    versionCode/versionName/url/note */
+    // ===== 应用内更新提示 =====
     private fun extractAppUpdate(head: String): JSONObject? {
         val m = Regex("""window\.WLZ_APP_UPDATE\s*=\s*(\{[^\n]*?\});""").find(head) ?: return null
-        return try { JSONObject(m.groupValues[1]) } catch (_: Exception) { null }
+        return try { JSONObject(m.groupValues[1]) } catch (e: Exception) { null }
     }
 
-    /**                    APK                                          */
+    /** 业务页声明更高 APK 版本时，弹「发现新版本」对话框（每版本仅提示一次） */
     private fun maybePromptAppUpdate() {
         val up = latestAppUpdate ?: return
-        val remoteCode = try { up.getInt("versionCode") } catch (_: Exception) { return }
+        val remoteCode = try { up.getInt("versionCode") } catch (e: Exception) { return }
         if (remoteCode <= BuildConfig.VERSION_CODE) return
         val key = "apk_update_prompted_$remoteCode"
         if (prefs.getBoolean(key, false)) return
@@ -503,42 +470,42 @@ class MainActivity : Activity() {
         if (url.isBlank()) return
         mainHandler.post {
             AlertDialog.Builder(this@MainActivity)
-                .setTitle("鍙戠幇鏂扮増鏈?v$name")
-                .setMessage(if (note.isBlank()) "鏈夋柊鐗堝彲鐢 紝鐐瑰嚮涓嬭浇鏇存柊銆? else note)
-                .setPositiveButton("绔嬪嵆涓嬭浇") { _, _ -> downloadApk(url, name) }
-                .setNegativeButton("绋嶅悗", null)
+                .setTitle("发现新版本 v$name")
+                .setMessage(if (note.isBlank()) "有新版可用，点击下载更新。" else note)
+                .setPositiveButton("立即下载") { _, _ -> downloadApk(url, name) }
+                .setNegativeButton("稍后", null)
                 .setCancelable(false)
                 .show()
         }
     }
 
-    /**     ?DownloadManager     APK                                   */
+    /** 用系统 DownloadManager 下载 APK 到应用私有下载目录 */
     private fun downloadApk(url: String, versionName: String) {
         try {
             val dm = downloadManager
                 ?: (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager)
             apkFileName = "wanlongzhou-supply-v$versionName.apk"
             val req = DownloadManager.Request(Uri.parse(url)).apply {
-                setTitle("涓囬緳娲蹭緵搴旈摼 App v$versionName")
-                setDescription("姝ｅ湪涓嬭浇鏇存柊鍖呪€?)
+                setTitle("万龙洲供应链 App v$versionName")
+                setDescription("正在下载更新包…")
                 setMimeType("application/vnd.android.package-archive")
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setDestinationInExternalFilesDir(this@MainActivity, Environment.DIRECTORY_DOWNLOADS, apkFileName)
             }
             apkDownloadId = dm.enqueue(req)
-            Toast.makeText(this, "寮€濮嬩笅杞芥洿鏂板寘锛屽畬鎴愬悗鑷 姩鎻愮ず瀹夎 ", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "开始下载更新包，完成后自动提示安装", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "涓嬭浇澶辫触锛?{e.message ?: "鏈 煡閿欒 "}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "下载失败：${e.message ?: "未知错误"}", Toast.LENGTH_LONG).show()
         }
     }
 
-    /**                     ileProvider                    ?Android 7+ */
+    /** 下载完成后拉起系统安装器（FileProvider 暴露私有下载目录，兼容 Android 7+） */
     private fun promptInstall() {
         try {
             val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return
             val file = File(dir, apkFileName)
             if (!file.exists()) {
-                Toast.makeText(this, "瀹夎 鍖呮湭鎵惧埌", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "安装包未找到", Toast.LENGTH_SHORT).show()
                 return
             }
             val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
@@ -551,13 +518,13 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             Toast.makeText(
                 this,
-                "鏃犳硶瀹夎 锛?{e.message ?: "鏈 煡閿欒 "}锛堣 鍒拌 缃 腑鍏佽 銆屽畨瑁呮湭鐭ュ簲鐢ㄣ€嶏級",
+                "无法安装：${e.message ?: "未知错误"}（请到设置中允许「安装未知应用」）",
                 Toast.LENGTH_LONG
             ).show()
         }
     }
 
-    /** JS                 window.__wlzApp.checkUpdate()          */
+    /** JS 桥：网页登录后可调用 window.__wlzApp.checkUpdate() 主动触发检测 */
     inner class WlzAppBridge {
         @JavascriptInterface
         fun checkUpdate() {
@@ -566,9 +533,9 @@ class MainActivity : Activity() {
     }
 
     private fun showNetworkError(desc: String?) {
-        val v = errView
+        val v = errorView
         v.findViewById<TextView>(R.id.errorText).text =
-            if (isOnline()) (desc ?: "椤甸潰鍔犺浇澶辫触") else getString(R.string.net_error_msg)
+            if (isOnline()) (desc ?: "页面加载失败") else getString(R.string.net_error_msg)
         v.visibility = View.VISIBLE
         splash.visibility = View.GONE
         progress.visibility = View.GONE
@@ -590,15 +557,15 @@ class MainActivity : Activity() {
         }
     }
 
-    // =====         4 ?====
+    // ===== 原生打印（A4）=====
     private fun printCurrentPage() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
-            toast("绯荤粺鐗堟湰杩囦綆锛屼笉鏀 寔鎵撳嵃")
+            toast("系统版本过低，不支持打印")
             return
         }
         val pm = getSystemService(Context.PRINT_SERVICE) as? PrintManager
         if (pm == null) {
-            toast("褰撳墠璁惧 涓嶆敮鎸佹墦鍗?)
+            toast("当前设备不支持打印")
             return
         }
         @Suppress("DEPRECATION")
@@ -611,7 +578,7 @@ class MainActivity : Activity() {
         pm.print(getString(R.string.print_job_name), adapter, attrs)
     }
 
-    // =====     =====
+    // ===== 菜单 =====
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, MENU_REFRESH, 0, R.string.menu_refresh)
         menu.add(0, MENU_CHECK_UPDATE, 0, R.string.menu_check_update)
@@ -642,13 +609,13 @@ class MainActivity : Activity() {
             }
             MENU_RESET_URL -> {
                 prefs.edit().putString(KEY_URL, DEFAULT_URL).apply()
-                toast("宸叉仮澶嶉粯璁ゅ湴鍧€")
+                toast("已恢复默认地址")
                 loadHome()
                 true
             }
             MENU_CLEAR_CACHE -> {
                 PageCache.clear(this)
-                toast("鏈 湴椤甸潰缂撳瓨宸叉竻闄わ紝涓嬫 鍚 姩閲嶆柊涓嬭浇")
+                toast("本地页面缓存已清除，下次启动重新下载")
                 loadHome()
                 true
             }
@@ -656,29 +623,28 @@ class MainActivity : Activity() {
         }
     }
 
-    /**
-     *             ?     *                ?localStorage                     ?     */
+    /** 清缓存重新加载（刻意不清 localStorage，否则丢草稿） */
     private fun clearCacheAndReload() {
         webView.clearCache(true)
         webView.clearFormData()
         loadHome()
-        toast("宸叉竻缂撳瓨骞堕噸鏂板姞杞?)
+        toast("已清缓存并重新加载")
     }
 
-    /**                   NAS                    ?App */
+    /** 服务器地址配置：后期迁 NAS 时改这里即可 */
     private fun showUrlDialog() {
         val input = EditText(this)
         input.setText(homeUrl)
         input.setSingleLine(true)
 
         AlertDialog.Builder(this)
-            .setTitle("鏈嶅姟鍣ㄥ湴鍧€")
-            .setMessage("鍚庢湡杩佸埌 NAS 鍚庯紝鎶婅繖閲屾敼鎴?NAS 涓婄殑璁块棶鍦板潃鍗冲彲锛孉pp 鏃犻渶閲嶆柊鎵撳寘銆?)
+            .setTitle("服务器地址")
+            .setMessage("后期迁到 NAS 后，把这里改成 NAS 上的访问地址即可，App 无需重新打包。")
             .setView(input)
-            .setPositiveButton("淇濆瓨骞舵墦寮€") { _, _ ->
+            .setPositiveButton("保存并打开") { _, _ ->
                 val raw = input.text.toString().trim()
                 if (raw.isBlank()) {
-                    toast("鍦板潃涓嶈兘涓虹┖")
+                    toast("地址不能为空")
                     return@setPositiveButton
                 }
                 val finalUrl =
@@ -687,11 +653,11 @@ class MainActivity : Activity() {
                 webView.clearCache(true)
                 loadHome()
             }
-            .setNegativeButton("鍙栨秷", null)
+            .setNegativeButton("取消", null)
             .show()
     }
 
-    // =====                                 ?=====
+    // ===== 返回键：优先网页内回退；已到首页则双击退出 =====
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             if (webView.canGoBack()) {
@@ -703,7 +669,7 @@ class MainActivity : Activity() {
                 finish()
             } else {
                 lastBackAt = now
-                toast("鍐嶆寜涓€娆￠€€鍑?)
+                toast("再按一次退出")
             }
             return true
         }
@@ -739,23 +705,20 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        try { unregisterReceiver(apkDownloadReceiver) } catch (_: Exception) {}
+        try { unregisterReceiver(apkDownloadReceiver) } catch (e: Exception) {}
     }
 
     companion object {
-        private val DEFAULT_URL: String by lazy {
-            val s = "https://www.workbuddy.link/p/1n4Jb5OioGpFwab2YHFXTs"
-            s
-        }
-        private val PREFS: String by lazy { "wlz_supply" }
-        private val KEY_URL: String by lazy { "server_url" }
-        private val REQ_FILE: Int = 1001
+        private const val DEFAULT_URL = "https://www.workbuddy.link/p/1n4Jb5OioGpFwab2YHFXTs"
+        private const val PREFS = "wlz_supply"
+        private const val KEY_URL = "server_url"
+        private const val REQ_FILE = 1001
 
-        private val MENU_REFRESH: Int = 1
-        private val MENU_SET_URL: Int = 2
-        private val MENU_RESET_URL: Int = 3
-        private val MENU_PRINT: Int = 4
-        private val MENU_CHECK_UPDATE: Int = 5
-        private val MENU_CLEAR_CACHE: Int = 6
+        private const val MENU_REFRESH = 1
+        private const val MENU_SET_URL = 2
+        private const val MENU_RESET_URL = 3
+        private const val MENU_PRINT = 4
+        private const val MENU_CHECK_UPDATE = 5
+        private const val MENU_CLEAR_CACHE = 6
     }
 }

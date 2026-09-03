@@ -117,7 +117,7 @@ class MainActivity : Activity() {
             downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             registerReceiver(apkDownloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
         } catch (e: Exception) {
-            android.util.Log.w("WlzApp", "涓嬭浇绠＄悊鍣ㄥ垵濮嬪寲澶辫触锛屽簲鐢ㄥ唴鏇存柊鏆備笉鍙敤: ${e.message}")
+            android.util.Log.w("WlzApp", "涓嬭浇绠＄悊鍣ㄥ垵濮嬪寲澶辫触锛屽簲鐢ㄥ唴鏇存柊鏆備笉鍙 敤: ${e.message}")
         }
 
         findViewById<Button>(R.id.btnRetry).setOnClickListener {
@@ -330,7 +330,7 @@ class MainActivity : Activity() {
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("鎻愮ず")
                     .setMessage(message)
-                    .setPositiveButton("纭畾") { _, _ -> result.confirm() }
+                    .setPositiveButton("纭 畾") { _, _ -> result.confirm() }
                     .setCancelable(false)
                     .show()
                 return true
@@ -340,9 +340,9 @@ class MainActivity : Activity() {
                 view: WebView, url: String, message: String, result: JsResult
             ): Boolean {
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("纭")
+                    .setTitle("纭  ")
                     .setMessage(message)
-                    .setPositiveButton("纭畾") { _, _ -> result.confirm() }
+                    .setPositiveButton("纭 畾") { _, _ -> result.confirm() }
                     .setNegativeButton("鍙栨秷") { _, _ -> result.cancel() }
                     .setCancelable(false)
                     .show()
@@ -359,7 +359,7 @@ class MainActivity : Activity() {
                     .setTitle("璇疯緭鍏?)
                     .setMessage(message)
                     .setView(input)
-                    .setPositiveButton("纭畾") { _, _ -> result.confirm(input.text.toString()) }
+                    .setPositiveButton("纭 畾") { _, _ -> result.confirm(input.text.toString()) }
                     .setNegativeButton("鍙栨秷") { _, _ -> result.cancel() }
                     .setCancelable(false)
                     .show()
@@ -427,7 +427,7 @@ class MainActivity : Activity() {
                 }
                 else -> {
                     swipe.isRefreshing = false
-                    Toast.makeText(this, "椤甸潰杩樺湪鍔犺浇锛岃绋嶅€欏啀鎷?, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "椤甸潰杩樺湪鍔犺浇锛岃 绋嶅€欏啀鎷?, Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -440,7 +440,7 @@ class MainActivity : Activity() {
      *                                 ?     */
     private fun checkUpdateAsync(notify: Boolean) {
         val url = bizUrl ?: run {
-            if (notify) toast("灏氭湭鑾峰彇鍒伴〉闈㈠湴鍧€锛岃绋嶅€欏啀璇?)
+            if (notify) toast("灏氭湭鑾峰彇鍒伴〉闈㈠湴鍧€锛岃 绋嶅€欏啀璇?)
             return
         }
         Thread {
@@ -464,7 +464,7 @@ class MainActivity : Activity() {
                 }
                 val ver = PageCache.extractVersion(head)
                 if (ver == null) {
-                    if (notify) mainHandler.post { toast("鏈兘璇嗗埆椤甸潰鐗堟湰") }
+                    if (notify) mainHandler.post { toast("鏈 兘璇嗗埆椤甸潰鐗堟湰") }
                     return@Thread
                 }
                 val updated = PageCache.save(this@MainActivity, bytes, ver)
@@ -504,7 +504,7 @@ class MainActivity : Activity() {
         mainHandler.post {
             AlertDialog.Builder(this@MainActivity)
                 .setTitle("鍙戠幇鏂扮増鏈?v$name")
-                .setMessage(if (note.isBlank()) "鏈夋柊鐗堝彲鐢紝鐐瑰嚮涓嬭浇鏇存柊銆? else note)
+                .setMessage(if (note.isBlank()) "鏈夋柊鐗堝彲鐢 紝鐐瑰嚮涓嬭浇鏇存柊銆? else note)
                 .setPositiveButton("绔嬪嵆涓嬭浇") { _, _ -> downloadApk(url, name) }
                 .setNegativeButton("绋嶅悗", null)
                 .setCancelable(false)
@@ -526,9 +526,9 @@ class MainActivity : Activity() {
                 setDestinationInExternalFilesDir(this@MainActivity, Environment.DIRECTORY_DOWNLOADS, apkFileName)
             }
             apkDownloadId = dm.enqueue(req)
-            Toast.makeText(this, "寮€濮嬩笅杞芥洿鏂板寘锛屽畬鎴愬悗鑷姩鎻愮ず瀹夎", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "寮€濮嬩笅杞芥洿鏂板寘锛屽畬鎴愬悗鑷 姩鎻愮ず瀹夎 ", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "涓嬭浇澶辫触锛?{e.message ?: "鏈煡閿欒"}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "涓嬭浇澶辫触锛?{e.message ?: "鏈 煡閿欒 "}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -538,7 +538,7 @@ class MainActivity : Activity() {
             val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return
             val file = File(dir, apkFileName)
             if (!file.exists()) {
-                Toast.makeText(this, "瀹夎鍖呮湭鎵惧埌", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "瀹夎 鍖呮湭鎵惧埌", Toast.LENGTH_SHORT).show()
                 return
             }
             val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
@@ -551,7 +551,7 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             Toast.makeText(
                 this,
-                "鏃犳硶瀹夎锛?{e.message ?: "鏈煡閿欒"}锛堣鍒拌缃腑鍏佽銆屽畨瑁呮湭鐭ュ簲鐢ㄣ€嶏級",
+                "鏃犳硶瀹夎 锛?{e.message ?: "鏈 煡閿欒 "}锛堣 鍒拌 缃 腑鍏佽 銆屽畨瑁呮湭鐭ュ簲鐢ㄣ€嶏級",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -593,12 +593,12 @@ class MainActivity : Activity() {
     // =====         4 ?====
     private fun printCurrentPage() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
-            toast("绯荤粺鐗堟湰杩囦綆锛屼笉鏀寔鎵撳嵃")
+            toast("绯荤粺鐗堟湰杩囦綆锛屼笉鏀 寔鎵撳嵃")
             return
         }
         val pm = getSystemService(Context.PRINT_SERVICE) as? PrintManager
         if (pm == null) {
-            toast("褰撳墠璁惧涓嶆敮鎸佹墦鍗?)
+            toast("褰撳墠璁惧 涓嶆敮鎸佹墦鍗?)
             return
         }
         @Suppress("DEPRECATION")
@@ -648,7 +648,7 @@ class MainActivity : Activity() {
             }
             MENU_CLEAR_CACHE -> {
                 PageCache.clear(this)
-                toast("鏈湴椤甸潰缂撳瓨宸叉竻闄わ紝涓嬫鍚姩閲嶆柊涓嬭浇")
+                toast("鏈 湴椤甸潰缂撳瓨宸叉竻闄わ紝涓嬫 鍚 姩閲嶆柊涓嬭浇")
                 loadHome()
                 true
             }

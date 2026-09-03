@@ -743,19 +743,19 @@ class MainActivity : Activity() {
     }
 
     companion object {
-        /**
-         *                        ?         *              workbuddy.link                           
-         *    ?          ?SDK                                  ?         */
-        private const val DEFAULT_URL = "https://www.workbuddy.link/p/1n4Jb5OioGpFwab2YHFXTs"
-        private const val PREFS = "wlz_supply"
-        private const val KEY_URL = "server_url"
-        private const val REQ_FILE = 1001
+        private val DEFAULT_URL: String by lazy {
+            val s = "https://www.workbuddy.link/p/1n4Jb5OioGpFwab2YHFXTs"
+            s
+        }
+        private val PREFS: String by lazy { "wlz_supply" }
+        private val KEY_URL: String by lazy { "server_url" }
+        private val REQ_FILE: Int = 1001
 
-        private const val MENU_REFRESH = 1
-        private const val MENU_SET_URL = 2
-        private const val MENU_RESET_URL = 3
-        private const val MENU_PRINT = 4
-        private const val MENU_CHECK_UPDATE = 5
-        private const val MENU_CLEAR_CACHE = 6
+        private val MENU_REFRESH: Int = 1
+        private val MENU_SET_URL: Int = 2
+        private val MENU_RESET_URL: Int = 3
+        private val MENU_PRINT: Int = 4
+        private val MENU_CHECK_UPDATE: Int = 5
+        private val MENU_CLEAR_CACHE: Int = 6
     }
 }

@@ -60,7 +60,7 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
 
     /**                       ?JS                      
-     *  SwipeRefreshLayout                    ?*/
+     *  SwipeRefreshLayout                    */
     private var pageAtTop = true
     private lateinit var progress: ProgressBar
     private lateinit var swipe: SwipeRefreshLayout
@@ -69,7 +69,7 @@ class MainActivity : Activity() {
 
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
-    /**                rev        ?WebView                    ?*/
+    /**                rev        ?WebView                    */
     @Volatile
     private var bizUrl: String? = null
 
@@ -94,7 +94,7 @@ class MainActivity : Activity() {
 
     private var lastBackAt = 0L
 
-    /**                   ?App                 ?*/
+    /**                   ?App                 */
     private val homeUrl: String
         get() = prefs.getString(KEY_URL, DEFAULT_URL)
             ?.takeIf { it.isNotBlank() } ?: DEFAULT_URL
@@ -134,7 +134,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /**       /                         ?*/
+    /**       /                         */
     private fun applySystemBars() {
         window.statusBarColor = getColorCompat(R.color.colorPrimaryDark)
         window.navigationBarColor = getColorCompat(R.color.colorPrimaryDark)
@@ -144,7 +144,7 @@ class MainActivity : Activity() {
     private fun getColorCompat(id: Int): Int =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) getColor(id) else resources.getColor(id)
 
-    /**                                      ?scroll     ?     *      ?window.scrollY                ?scrollTop             ?     *                           SwipeRefreshLayout              ?     *       ebView.scrollY                    ?div        ?0 ?     *                    ?                                ?*/
+    /**                                      ?scroll     ?     *      ?window.scrollY                ?scrollTop             ?     *                           SwipeRefreshLayout              ?     *       ebView.scrollY                    ?div        ?0 ?     *                    ?                                */
     private val SCROLL_JS = """
         (function(){
           function report(e){
@@ -159,7 +159,7 @@ class MainActivity : Activity() {
         })();
     """.trimIndent()
 
-    /**     WorkBuddy               WorkBuddy              v1.4   ?                       HTML                 ?chrome          ?JS     ?       v1.3           class     'workbuddy'                    ?body/          ? ?    ?                        WorkBuddy /                            class                  ?*/
+    /**     WorkBuddy               WorkBuddy              v1.4   ?                       HTML                 ?chrome          ?JS     ?       v1.3           class     'workbuddy'                    ?body/          ? ?    ?                        WorkBuddy /                            class                  */
     private val HIDE_FAB_JS = """
         (function(){
           function hideEl(el){ if(el && el.style){ el.style.display='none'; el.style.visibility='hidden'; el.style.pointerEvents='none'; } }
@@ -195,7 +195,7 @@ class MainActivity : Activity() {
         })();
     """.trimIndent()
 
-    /** JS                          ?*/
+    /** JS                          */
     inner class WbScrollBridge {
         @JavascriptInterface
         fun atTop(v: Int) {
@@ -203,7 +203,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /**                                                         ?*/
+    /**                                                         */
     private fun loadHome() {
         val url = homeUrl
         val sep = if (url.contains("?")) "&" else "?"
@@ -393,7 +393,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /**                                      rev     ?*/
+    /**                                      rev     */
     private fun isBizPage(url: String): Boolean =
         url.contains("/page/") && url.substringBefore("?").endsWith("hotel_requisition.html")
 
@@ -483,7 +483,7 @@ class MainActivity : Activity() {
     }
 
     // =====             v1.7 ?====
-    /**              ?window.WLZ_APP_UPDATE JSON    versionCode/versionName/url/note ?*/
+    /**              ?window.WLZ_APP_UPDATE JSON    versionCode/versionName/url/note */
     private fun extractAppUpdate(head: String): JSONObject? {
         val m = Regex("""window\.WLZ_APP_UPDATE\s*=\s*(\{[^\n]*?\});""").find(head) ?: return null
         return try { JSONObject(m.groupValues[1]) } catch (_: Exception) { null }
@@ -512,7 +512,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /**     ?DownloadManager     APK                                   ?*/
+    /**     ?DownloadManager     APK                                   */
     private fun downloadApk(url: String, versionName: String) {
         try {
             val dm = downloadManager
@@ -532,7 +532,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /**                     ileProvider                    ?Android 7+ ?*/
+    /**                     ileProvider                    ?Android 7+ */
     private fun promptInstall() {
         try {
             val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return
@@ -557,7 +557,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /** JS                 window.__wlzApp.checkUpdate()          ?*/
+    /** JS                 window.__wlzApp.checkUpdate()          */
     inner class WlzAppBridge {
         @JavascriptInterface
         fun checkUpdate() {

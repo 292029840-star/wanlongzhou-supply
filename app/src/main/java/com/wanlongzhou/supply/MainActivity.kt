@@ -377,11 +377,12 @@ class MainActivity : Activity() {
     private fun isBizPage(url: String): Boolean =
         url.contains("/page/") && url.substringBefore("?").endsWith("hotel_requisition.html")
 
-    // ===== 下拉刷新 =====
+    // ===== 下拉刷新（v1.8：用户要求禁用下拉刷新手势——下拉只滚动页面，不再触发刷新；
+    //       trySoftRefresh 保留供后续菜单入口复用，isEnabled=false 后手势不会再触发） =====
     private fun setupSwipe() {
         swipe.setColorSchemeColors(getColorCompat(R.color.colorPrimary))
         swipe.setOnRefreshListener { trySoftRefresh(0) }
-        swipe.isEnabled = true
+        swipe.isEnabled = false
         swipe.setOnChildScrollUpCallback { _, _ -> !pageAtTop }
         val triggerPx = (resources.displayMetrics.density * 140).toInt()
         swipe.setDistanceToTriggerSync(triggerPx)

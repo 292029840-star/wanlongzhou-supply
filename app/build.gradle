@@ -11,8 +11,8 @@ android {
         applicationId "com.wanlongzhou.supply"
         minSdk 26            // Android 8.0 及以上
         targetSdk 34
-        versionCode 9
-        versionName "1.8"
+        versionCode 10
+        versionName "1.8.1"
     }
 
     // 固定签名：CI 从 repo Secret 解码 PKCS12 keystore，所有版本签名一致 → 可无缝覆盖升级。

@@ -410,13 +410,15 @@ class MainActivity : Activity() {
             if (notify) toast("尚未获取到页面地址，请稍候再试")
             return
         }
+        // WebView 方法必须在 UI 线程调用：后台线程启动前读取 UA，避免 wrong thread 异常
+        val userAgent = webView.settings.userAgentString
         Thread {
             try {
                 val conn = URL(url).openConnection() as HttpURLConnection
                 conn.connectTimeout = 15_000
                 conn.readTimeout = 30_000
                 conn.instanceFollowRedirects = true
-                conn.setRequestProperty("User-Agent", webView.settings.userAgentString)
+                conn.setRequestProperty("User-Agent", userAgent)
                 val code = conn.responseCode
                 if (code != HttpURLConnection.HTTP_OK) {
                     if (notify) mainHandler.post { toast("检查失败（HTTP $code）") }

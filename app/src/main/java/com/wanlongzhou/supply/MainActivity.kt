@@ -437,7 +437,8 @@ class MainActivity : Activity() {
     }
 
     // ===== 热更新：后台拉取业务页，按 APP_VERSION 判断是否更新 =====
-    private fun checkUpdateAsync(notify: Boolean) {
+    /** [force]=true 用于菜单主动「检查更新」：忽略静默/冷却状态强制弹出，并给出 App 版本结论 */
+    private fun checkUpdateAsync(notify: Boolean, force: Boolean = false) {
         val url = bizUrl ?: run {
             if (notify) toast("尚未获取到页面地址，请稍候再试")
             return
@@ -461,7 +462,10 @@ class MainActivity : Activity() {
                 val appUp = extractAppUpdate(head)
                 if (appUp != null) {
                     latestAppUpdate = appUp
-                    maybePromptAppUpdate()
+                    maybePromptAppUpdate(force)
+                } else if (force) {
+                    // 业务页未声明更新元信息（非本壳打包的页面），主动检查时给个明确结论
+                    mainHandler.post { toast("该页面未声明 App 版本信息") }
                 }
                 val ver = PageCache.extractVersion(head)
                 if (ver == null) {
@@ -489,14 +493,23 @@ class MainActivity : Activity() {
         return try { JSONObject(m.groupValues[1]) } catch (e: Exception) { null }
     }
 
-    /** 业务页声明更高 APK 版本时，弹「发现新版本」对话框（每版本仅提示一次） */
-    private fun maybePromptAppUpdate() {
+    /** 业务页声明更高 APK 版本时，弹「发现新版本」对话框。
+     *  「稍后」= 冷却 72 小时内不再提醒，超过后下次启动重新弹出；
+     *  「以后不再提示」= 该版本永久静默；
+     *  [force]=true（菜单主动检查）忽略上述状态强制弹出。 */
+    private fun maybePromptAppUpdate(force: Boolean = false) {
         val up = latestAppUpdate ?: return
         val remoteCode = try { up.getInt("versionCode") } catch (e: Exception) { return }
-        if (remoteCode <= BuildConfig.VERSION_CODE) return
-        val key = "apk_update_prompted_$remoteCode"
-        if (prefs.getBoolean(key, false)) return
-        prefs.edit().putBoolean(key, true).apply()
+        if (remoteCode <= BuildConfig.VERSION_CODE) {
+            if (force) mainHandler.post { toast("App 已是最新版本 v${BuildConfig.VERSION_NAME}") }
+            return
+        }
+        val silentKey = "apk_update_silenced_$remoteCode"
+        if (!force && prefs.getBoolean(silentKey, false)) return
+        val coolKey = "apk_update_dismissed_$remoteCode"
+        if (!force && prefs.getLong(coolKey, 0L).let { d ->
+            d > 0L && System.currentTimeMillis() - d < UPDATE_COOLDOWN_MS
+        }) return
         val name = up.optString("versionName", remoteCode.toString())
         val note = up.optString("note", "")
         val url = up.optString("url", "")
@@ -505,9 +518,14 @@ class MainActivity : Activity() {
             AlertDialog.Builder(this@MainActivity)
                 .setTitle("发现新版本 v$name")
                 .setMessage(if (note.isBlank()) "有新版可用，点击下载更新。" else note)
-                .setPositiveButton("立即下载") { _, _ -> downloadApk(url, name) }
-                .setNegativeButton("稍后", null)
                 .setCancelable(false)
+                .setPositiveButton("立即下载") { _, _ -> downloadApk(url, name) }
+                .setNeutralButton("以后不再提示") { _, _ ->
+                    prefs.edit().putBoolean(silentKey, true).remove(coolKey).apply()
+                }
+                .setNegativeButton("稍后") { _, _ ->
+                    prefs.edit().remove(silentKey).putLong(coolKey, System.currentTimeMillis()).apply()
+                }
                 .show()
         }
     }
@@ -629,7 +647,7 @@ class MainActivity : Activity() {
                 true
             }
             MENU_CHECK_UPDATE -> {
-                checkUpdateAsync(notify = true)
+                checkUpdateAsync(notify = true, force = true)
                 true
             }
             MENU_PRINT -> {
@@ -753,5 +771,8 @@ class MainActivity : Activity() {
         private const val MENU_PRINT = 4
         private const val MENU_CHECK_UPDATE = 5
         private const val MENU_CLEAR_CACHE = 6
+
+        /** 「稍后」后再提醒的冷却窗口：3 天 */
+        private const val UPDATE_COOLDOWN_MS = 3L * 24 * 3600 * 1000
     }
 }

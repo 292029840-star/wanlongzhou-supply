@@ -219,10 +219,12 @@ class MainActivity : Activity() {
                 swipe.isRefreshing = false
                 splash.postDelayed({ splash.visibility = View.GONE }, 250)
                 checkUpdateAsync(notify = false)
-                // 业务页才注入（滚动探测 + 隐藏平台浮窗）
+                // 隐藏平台「回WorkBuddy继续聊」浮窗：外壳页 + 业务页都注入（v1.8.2 起改安全版，可作用外壳页；
+                // 旧版只敢注入业务页，外壳页注入会误隐藏 React 挂载点导致整页白屏）
+                webView.evaluateJavascript(HIDE_FAB_JS, null)
+                // 滚动探测只对业务页有意义（外壳页无 __wbScroll 桥）
                 if (isBizPage(url)) {
                     webView.evaluateJavascript(SCROLL_JS, null)
-                    webView.evaluateJavascript(HIDE_FAB_JS, null)
                 }
             }
 
@@ -329,36 +331,66 @@ class MainActivity : Activity() {
         })();
     """.trimIndent()
 
-    /** 隐藏平台「回WorkBuddy继续聊」浮窗（只按文本命中，不宽泛匹配 class） */
+    /** 隐藏平台「回WorkBuddy继续聊」浮窗。
+     *  v1.8.2 起外壳页 + 业务页都注入，因此必须是"安全版"：
+     *   ① 文本命中加长度守卫 t.length<=80 —— v1.3 白屏根因：FAB 文案的祖先容器 textContent 也含该子串，
+     *      命中祖先会把整个 #root 藏成白屏。
+     *   ② 直接子元素数守卫 children.length<=5 —— React 挂载点 / 路由容器直接子元素极多，FAB 本身很小；O(1) 判断。
+     *   ③ 显式跳过 body/html 与 id 命中 root|app|main|container|shell|viewport 的容器。
+     *   ④ MutationObserver 只做有界增量扫描（仅新增节点子树，上限 400 节点）—— 外壳页 SPA + 业务页都高频重渲染，全页重扫会卡。
+     */
     private val HIDE_FAB_JS = """
         (function(){
           function hideEl(el){ if(el && el.style){ el.style.display='none'; el.style.visibility='hidden'; el.style.pointerEvents='none'; } }
           var clsRe = /wk-fab|chat-float|float-chat|back-to|continue-chat|floating-btn|fab-btn/i;
-          function hideWbFab(){
+          var skipIdRe = /(^|[-_])(root|app|main|container|shell|viewport)([-_]|$)/i;
+          var hidden = (typeof WeakSet==='function') ? new WeakSet() : null;
+          function isHidden(el){ return hidden ? hidden.has(el) : false; }
+          function mark(el){ if(hidden){ try{ hidden.add(el); }catch(e){} } }
+          function txt(el){ try{ return (el.innerText||el.textContent||'').trim(); }catch(e){ return ''; } }
+          function safe(el){
+            if(!el || el.nodeType!==1) return false;
+            if(el===document.body || el===document.documentElement) return false;
+            var id = el.id || '';
+            if(id && skipIdRe.test(id)) return false;
+            try{ if(el.children && el.children.length>5) return false; }catch(e){ return false; }
+            return true;
+          }
+          function hit(el){
+            if(!safe(el) || isHidden(el)) return false;
+            var cls = (el.className||'').toString();
+            if(clsRe.test(cls)) return true;
+            var t = txt(el);
+            return t.length>0 && t.length<=80 && (t.indexOf('回WorkBuddy')>=0 || t.indexOf('继续聊')>=0);
+          }
+          function walk(node){
+            if(!node || node.nodeType!==1) return;
+            if(hit(node)){ hideEl(node); mark(node); return; }
             try{
-              var nodes = document.querySelectorAll('a,button,div,span,img,svg');
-              for(var i=0;i<nodes.length;i++){
-                var el = nodes[i];
-                var txt = (el.innerText||el.textContent||'').trim();
-                var cls = (el.className||'').toString();
-                if(txt && (txt.indexOf('回WorkBuddy')>=0 || txt.indexOf('继续聊')>=0)){ hideEl(el); }
-                else if(clsRe.test(cls)){ hideEl(el); }
-              }
-              var links = document.querySelectorAll('a[href*="workbuddy"]');
-              for(var j=0;j<links.length;j++){
-                var l = links[j], lt = (l.innerText||'').trim();
-                if(lt.indexOf('回WorkBuddy')>=0 || lt.indexOf('继续聊')>=0){ hideEl(l); }
+              var d = node.querySelectorAll('a,button,div,span,img,svg');
+              for(var i=0;i<d.length && i<400;i++){ if(hit(d[i])){ hideEl(d[i]); mark(d[i]); } }
+              var ls = node.querySelectorAll('a[href*="workbuddy"]');
+              for(var j=0;j<ls.length;j++){
+                var l = ls[j], lt = txt(l);
+                if(safe(l) && (lt.indexOf('回WorkBuddy')>=0 || lt.indexOf('继续聊')>=0)){ hideEl(l); mark(l); }
               }
             }catch(e){}
           }
+          function hideWbFab(){ if(document.body){ walk(document.body); } }
           hideWbFab();
-          [600,1500,3000,6000].forEach(function(t){ setTimeout(hideWbFab, t); });
+          [500,1200,2500,5000,10000,20000,40000].forEach(function(t){ setTimeout(hideWbFab, t); });
           if(window.MutationObserver){
             try{
               var timer = null;
-              new MutationObserver(function(){
+              new MutationObserver(function(muts){
                 if(timer) return;
-                timer = setTimeout(function(){ timer=null; hideWbFab(); }, 120);
+                timer = setTimeout(function(){
+                  timer = null;
+                  for(var i=0;i<muts.length;i++){
+                    var an = muts[i].addedNodes;
+                    for(var k=0;k<an.length;k++){ walk(an[k]); }
+                  }
+                }, 150);
               }).observe(document.body, {childList:true, subtree:true});
             }catch(e){}
           }

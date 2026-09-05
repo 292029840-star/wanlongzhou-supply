@@ -581,6 +581,50 @@ class MainActivity : Activity() {
         fun checkUpdate() {
             mainHandler.post { maybePromptAppUpdate() }
         }
+
+        /**
+         * v1.8.4 导出落盘：WebView 里 blob:/a.click() 下载会被静默丢弃（DownloadListener 收不到 blob:），
+         * 网页把导出内容转 base64 调本方法，由原生写入系统「下载」目录并 toast 路径。
+         * API 29+ 走 MediaStore.Downloads（用户在文件管理/下载里直接可见）；26-28 落 App 私有 Download 目录。
+         */
+        @JavascriptInterface
+        fun saveFile(name: String, base64: String) {
+            try {
+                val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                val safeName = name.replace('/', '_').replace('\\', '_')
+                    .ifBlank { "export_${System.currentTimeMillis()}" }
+                val where: String = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val values = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Downloads.DISPLAY_NAME, safeName)
+                        put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeFor(safeName))
+                        put(android.provider.MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                    }
+                    val resolver = applicationContext.contentResolver
+                    val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                        ?: throw IllegalStateException("系统拒绝了写入请求")
+                    resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                        ?: throw IllegalStateException("无法打开输出流")
+                    "下载/" + safeName
+                } else {
+                    val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                        ?: throw IllegalStateException("存储不可用")
+                    val f = java.io.File(dir, safeName)
+                    java.io.FileOutputStream(f).use { it.write(bytes) }
+                    f.absolutePath
+                }
+                mainHandler.post { toast("已保存：$where") }
+            } catch (e: Exception) {
+                mainHandler.post { toast("保存失败：${e.message ?: "未知错误"}") }
+            }
+        }
+
+        private fun mimeFor(name: String): String = when {
+            name.endsWith(".xlsx", true) -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            name.endsWith(".xls", true) -> "application/vnd.ms-excel"
+            name.endsWith(".csv", true) -> "text/csv"
+            name.endsWith(".json", true) -> "application/json"
+            else -> "application/octet-stream"
+        }
     }
 
     private fun showNetworkError(desc: String?) {

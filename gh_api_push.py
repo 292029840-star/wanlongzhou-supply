@@ -114,7 +114,8 @@ def main():
 
     if not args.token:
         sys.exit("缺少 token: 用 --token 或环境变量 GH_TOKEN")
-    proxy = args.proxy or os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or DEFAULT_PROXY
+    # v1.8.4 起默认直连（本机代理 127.0.0.1:56625 已停用，直连 api.github.com 正常）；仍可用 --proxy/--env 显式指定
+    proxy = args.proxy or os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
     opener = build_opener(proxy)
 
     base_sha, base_tree, remote = get_remote_tree(opener, args.token, args.owner, args.repo, args.branch)

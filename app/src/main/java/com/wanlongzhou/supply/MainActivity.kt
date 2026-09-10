@@ -87,6 +87,13 @@ class MainActivity : Activity() {
     /** v1.8.5：最近若干条控制台日志，白屏时展示出来便于定位（只留最近 30 条） */
     private val consoleLog = java.util.Collections.synchronizedList(mutableListOf<String>())
 
+    /** v1.8.6：看门狗状态 —— 业务页与外壳页是跨域 iframe，原生读不到 iframe 正文，
+     *  必须靠「业务页主动报到(booted) + 控制台活性」判断页面是否真的活着，否则必然误报白屏。 */
+    @Volatile private var bootReported = false      // 业务页已调用 __wlzApp.booted() 报到
+    @Volatile private var lastConsoleAt = 0L        // 最近一次控制台输出时间（任何页面）
+    @Volatile private var blankErrorShowing = false // 当前错误页是否为白屏看门狗弹出的
+    private var blankChecks = 0                     // 看门狗已检查轮数
+
     /** 当前生效的业务地址（可在 App 内改，默认取线上地址） */
     private val homeUrl: String
         get() = prefs.getString(KEY_URL, DEFAULT_URL)
@@ -146,8 +153,19 @@ class MainActivity : Activity() {
         val sep = if (url.contains("?")) "&" else "?"
         errorView.visibility = View.GONE
         splash.visibility = View.VISIBLE
+        // v1.8.6：重置看门狗状态（新一轮加载）
+        bootReported = false
+        blankChecks = 0
+        blankErrorShowing = false
         mainHandler.removeCallbacks(blankCheckRunnable)
+        mainHandler.removeCallbacks(splashFallbackRunnable)
         webView.loadUrl(url + sep + "_t=" + System.currentTimeMillis())
+    }
+
+    /** v1.8.6：业务页迟迟不报到时的兜底收 loading（外壳页 onPageFinished 后 20 秒）。
+     *  之前 250ms 就收 loading，而 iframe 在手机网络上还要再拉几秒数据，用户看到的就是白屏。 */
+    private val splashFallbackRunnable = Runnable {
+        if (!bootReported && errorView.visibility != View.VISIBLE) splash.visibility = View.GONE
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -222,7 +240,10 @@ class MainActivity : Activity() {
             override fun onPageFinished(view: WebView, url: String) {
                 progress.visibility = View.GONE
                 swipe.isRefreshing = false
-                splash.postDelayed({ splash.visibility = View.GONE }, 250)
+                // v1.8.6：不再立刻收 loading —— 业务页(iframe)在外壳页 load 完后还要拉数据，
+                // 提前收掉就是一段白屏。改为：业务页 __wlzApp.booted() 报到时收，或 20s 兜底收。
+                mainHandler.removeCallbacks(splashFallbackRunnable)
+                mainHandler.postDelayed(splashFallbackRunnable, 20000)
                 scheduleBlankCheck()
                 checkUpdateAsync(notify = false)
                 // 隐藏平台「回WorkBuddy继续聊」浮窗：外壳页 + 业务页都注入（v1.8.2 起改安全版，可作用外壳页；
@@ -258,6 +279,13 @@ class MainActivity : Activity() {
                     }
                     consoleLog.add("$lvl ${m.message()} @${m.sourceId()}:${m.lineNumber()}")
                     while (consoleLog.size > 30) consoleLog.removeAt(0)
+                    // v1.8.6：记录控制台活性 —— 业务页还在输出日志就说明页面活着，
+                    // 不能因为跨域 iframe 读不到正文就判白屏
+                    lastConsoleAt = System.currentTimeMillis()
+                    if (m.message().contains("AppLog")) {
+                        // 业务页真的跑起来了：即便错误页已经弹出，也立刻撤掉（属于误报）
+                        if (blankErrorShowing) mainHandler.post { hideBlankError() }
+                    }
                 } catch (_: Exception) {
                 }
                 return false
@@ -604,6 +632,22 @@ class MainActivity : Activity() {
         }
 
         /**
+         * v1.8.6 首屏报到：业务页首屏渲染完成（登录页显示或已进入应用）后调用，
+         * 原生据此收掉 loading 并撤销白屏看门狗。跨域 iframe 的正文原生读不到，
+         * 这个报到信号是判断「页面真的好了」最可靠的依据。
+         */
+        @JavascriptInterface
+        fun booted() {
+            bootReported = true
+            mainHandler.post {
+                splash.visibility = View.GONE
+                mainHandler.removeCallbacks(blankCheckRunnable)
+                mainHandler.removeCallbacks(splashFallbackRunnable)
+                if (blankErrorShowing) hideBlankError()
+            }
+        }
+
+        /**
          * v1.8.4 导出落盘：WebView 里 blob:/a.click() 下载会被静默丢弃（DownloadListener 收不到 blob:），
          * 网页把导出内容转 base64 调本方法，由原生写入系统「下载」目录并 toast 路径。
          * API 29+ 走 MediaStore.Downloads（用户在文件管理/下载里直接可见）；26-28 落 App 私有 Download 目录。
@@ -648,18 +692,26 @@ class MainActivity : Activity() {
         }
     }
 
-    // ===== v1.8.5：白屏看门狗 =====
+    // ===== v1.8.5 白屏看门狗 / v1.8.6 修正误报 =====
     // 背景：外壳页(4KB)加载成功后由 React 去装载 540KB 的业务页；若业务页拉取失败或 JS 报错，
-    // 老版本只留下「有 Logo 然后白屏」，没有任何提示。这里在页面加载完成后延时自检：
-    // 仍然没有可见内容，就把「失败原因 + 控制台最近错误」显示出来，用户截图即可定位。
+    // 老版本只留下「有 Logo 然后白屏」，没有任何提示。
+    // v1.8.6 教训（实测截图）：业务页与外壳页是跨域 iframe，原生 evaluateJavascript 只作用
+    // 外壳页主框架 —— document.body.innerText 永远读不到 iframe 里的登录页/首页内容，
+    // 旧逻辑 8 秒后必然误报白屏，还用全屏错误页把正常页面盖住（业务页日志显示 loadAll 早已完成）。
+    // 修正为三重信号：① 业务页 __wlzApp.booted() 报到 → 立即收工；
+    //                 ② 控制台仍在输出（AppLog）→ 页面活着，继续等，绝不弹错误页；
+    //                 ③ 外壳页本身有可见正文/可见容器 → ok。
+    // 同时错误页支持「迟到自动撤销」：弹错之后业务页日志又来了 → 自动撤掉错误页。
     private val blankCheckRunnable = Runnable { checkBlank() }
 
     private fun scheduleBlankCheck() {
+        blankChecks = 0
         mainHandler.removeCallbacks(blankCheckRunnable)
-        mainHandler.postDelayed(blankCheckRunnable, 8000)
+        mainHandler.postDelayed(blankCheckRunnable, 12000)
     }
 
-    /** 判断页面是否真的渲染出内容：正文极少且登录/主界面容器都不可见 → 判定白屏 */
+    /** 判断页面是否真的渲染出内容（在【外壳页】主框架里执行）：
+     *  外壳页自身有可见正文/容器 → ok；有可见且足够大的 iframe → iframe（正文读不到，需结合控制台活性） */
     private val BLANK_CHECK_JS = """
         (function(){
           try{
@@ -673,25 +725,45 @@ class MainActivity : Activity() {
                 if(e){ var r=e.getBoundingClientRect(); if(r.width>10&&r.height>10) vis++; }
               }
             }catch(e){}
-            if(txt.length<20 && vis===0) return 'blank';
-            return 'ok';
+            if(vis>0 || txt.length>=20) return 'ok';
+            try{
+              var f=document.querySelector('iframe');
+              if(f){ var g=f.getBoundingClientRect(); if(g.width>50&&g.height>50) return 'iframe'; }
+            }catch(e){}
+            return 'blank';
           }catch(e){ return 'err:'+((e&&e.message)?e.message:e); }
         })()
     """.trimIndent()
 
     private fun checkBlank() {
+        blankChecks++
+        if (bootReported) { hideBlankError(); return }
+        val consoleFresh = System.currentTimeMillis() - lastConsoleAt < 15000
         try {
             webView.evaluateJavascript(BLANK_CHECK_JS) { res ->
                 val r = (res ?: "").trim().trim('"')
-                if (r == "blank" || r == "nobody" || r.startsWith("err:")) {
-                    showBlankScreen(r)
+                val ok = r == "ok" || (r == "iframe" && consoleFresh)
+                if (ok) {
+                    if (blankErrorShowing) hideBlankError()
+                    return@evaluateJavascript
                 }
+                // 还在输出日志 / 前几轮宽限期 → 页面可能只是慢，继续等，最多约 1 分钟
+                if (consoleFresh && blankChecks < 8) { mainHandler.postDelayed(blankCheckRunnable, 6000); return@evaluateJavascript }
+                if (blankChecks < 3) { mainHandler.postDelayed(blankCheckRunnable, 6000); return@evaluateJavascript }
+                showBlankScreen(r.ifBlank { "blank" })
             }
         } catch (_: Exception) {
         }
     }
 
+    private fun hideBlankError() {
+        if (!blankErrorShowing) return
+        blankErrorShowing = false
+        errorView.visibility = View.GONE
+    }
+
     private fun showBlankScreen(reason: String) {
+        blankErrorShowing = true
         val v = errorView
         v.findViewById<TextView>(R.id.errorText).text =
             "页面加载完成但没有内容（$reason）。下面是浏览器控制台最近的输出，截图发给技术即可定位。"

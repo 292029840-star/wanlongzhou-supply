@@ -2,10 +2,13 @@ name: 构建安卓 APK
 
 # 触发方式：
 #   1. 在 GitHub 仓库页面 → Actions → 本工作流 → Run workflow（手动，最常用）
-#   2. 推送 v* 标签时自动构建
+#   2. 推送到 main 分支时自动构建（v1.8.5 起：由工作流自动按 versionName 建 Release，
+#      无需再手工打 tag —— 手工打 v* 标签仍然支持）
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
 
@@ -67,12 +70,22 @@ jobs:
           path: app/build/outputs/apk/release/app-release.apk
           retention-days: 30
 
-      # 打 tag 时自动建 GitHub Release 并附上 APK，供应用内更新一键下载
-      # 下载直链：https://github.com/<repo>/releases/download/<tag>/app-release.apk
+      # v1.8.5 起：不再依赖手工打 tag —— 直接从 build.gradle 读 versionName，
+      # 建 v<versionName> 的 Release 并附上 APK，供应用内更新一键下载。
+      # 下载直链：https://github.com/<repo>/releases/download/v<versionName>/app-release.apk
+      - name: 读取版本名
+        id: ver
+        run: |
+          VN=$(sed -n 's/.*versionName[[:space:]]*"\([^"]*\)".*/\1/p' app/build.gradle | head -1)
+          if [ -z "$VN" ]; then echo "未能从 build.gradle 解析 versionName" >&2; exit 1; fi
+          echo "version=$VN" >> "$GITHUB_OUTPUT"
+
       - name: 创建 Release 并附 APK
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: 万龙洲供应链 App ${{ github.ref_name }}
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: 万龙洲供应链 App v${{ steps.ver.outputs.version }}
           body: 自动构建的 Release 安装包（固定签名，可无缝覆盖升级；应用内更新可用）
           files: app/build/outputs/apk/release/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

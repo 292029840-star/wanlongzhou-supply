@@ -23,6 +23,7 @@ import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.JsPromptResult
@@ -83,6 +84,9 @@ class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
     private var lastBackAt = 0L
 
+    /** v1.8.5：最近若干条控制台日志，白屏时展示出来便于定位（只留最近 30 条） */
+    private val consoleLog = java.util.Collections.synchronizedList(mutableListOf<String>())
+
     /** 当前生效的业务地址（可在 App 内改，默认取线上地址） */
     private val homeUrl: String
         get() = prefs.getString(KEY_URL, DEFAULT_URL)
@@ -142,6 +146,7 @@ class MainActivity : Activity() {
         val sep = if (url.contains("?")) "&" else "?"
         errorView.visibility = View.GONE
         splash.visibility = View.VISIBLE
+        mainHandler.removeCallbacks(blankCheckRunnable)
         webView.loadUrl(url + sep + "_t=" + System.currentTimeMillis())
     }
 
@@ -218,6 +223,7 @@ class MainActivity : Activity() {
                 progress.visibility = View.GONE
                 swipe.isRefreshing = false
                 splash.postDelayed({ splash.visibility = View.GONE }, 250)
+                scheduleBlankCheck()
                 checkUpdateAsync(notify = false)
                 // 隐藏平台「回WorkBuddy继续聊」浮窗：外壳页 + 业务页都注入（v1.8.2 起改安全版，可作用外壳页；
                 // 旧版只敢注入业务页，外壳页注入会误隐藏 React 挂载点导致整页白屏）
@@ -242,6 +248,21 @@ class MainActivity : Activity() {
         }
 
         webView.webChromeClient = object : WebChromeClient() {
+            // v1.8.5：记录控制台输出，白屏时把最近的错误显示给用户（截图即可定位）
+            override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                try {
+                    val lvl = when (m.messageLevel()) {
+                        ConsoleMessage.MessageLevel.ERROR -> "ERROR"
+                        ConsoleMessage.MessageLevel.WARNING -> "WARN"
+                        else -> "LOG"
+                    }
+                    consoleLog.add("$lvl ${m.message()} @${m.sourceId()}:${m.lineNumber()}")
+                    while (consoleLog.size > 30) consoleLog.removeAt(0)
+                } catch (_: Exception) {
+                }
+                return false
+            }
+
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 progress.progress = newProgress
                 progress.visibility = if (newProgress < 100) View.VISIBLE else View.GONE
@@ -627,10 +648,68 @@ class MainActivity : Activity() {
         }
     }
 
+    // ===== v1.8.5：白屏看门狗 =====
+    // 背景：外壳页(4KB)加载成功后由 React 去装载 540KB 的业务页；若业务页拉取失败或 JS 报错，
+    // 老版本只留下「有 Logo 然后白屏」，没有任何提示。这里在页面加载完成后延时自检：
+    // 仍然没有可见内容，就把「失败原因 + 控制台最近错误」显示出来，用户截图即可定位。
+    private val blankCheckRunnable = Runnable { checkBlank() }
+
+    private fun scheduleBlankCheck() {
+        mainHandler.removeCallbacks(blankCheckRunnable)
+        mainHandler.postDelayed(blankCheckRunnable, 8000)
+    }
+
+    /** 判断页面是否真的渲染出内容：正文极少且登录/主界面容器都不可见 → 判定白屏 */
+    private val BLANK_CHECK_JS = """
+        (function(){
+          try{
+            var b=document.body; if(!b) return 'nobody';
+            var txt=(b.innerText||b.textContent||'').replace(/\s/g,'');
+            var vis=0;
+            try{
+              var ids=['loginScreen','appScreen','appBody','tabBody'];
+              for(var i=0;i<ids.length;i++){
+                var e=document.getElementById(ids[i]);
+                if(e){ var r=e.getBoundingClientRect(); if(r.width>10&&r.height>10) vis++; }
+              }
+            }catch(e){}
+            if(txt.length<20 && vis===0) return 'blank';
+            return 'ok';
+          }catch(e){ return 'err:'+((e&&e.message)?e.message:e); }
+        })()
+    """.trimIndent()
+
+    private fun checkBlank() {
+        try {
+            webView.evaluateJavascript(BLANK_CHECK_JS) { res ->
+                val r = (res ?: "").trim().trim('"')
+                if (r == "blank" || r == "nobody" || r.startsWith("err:")) {
+                    showBlankScreen(r)
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun showBlankScreen(reason: String) {
+        val v = errorView
+        v.findViewById<TextView>(R.id.errorText).text =
+            "页面加载完成但没有内容（$reason）。下面是浏览器控制台最近的输出，截图发给技术即可定位。"
+        val log = consoleLog.toList().takeLast(8).joinToString("\n")
+        v.findViewById<TextView>(R.id.errorLog).text =
+            if (log.isBlank()) "（未捕获到控制台输出：常见于业务页拉取失败，或 WebView 版本过低）" else log
+        v.findViewById<View>(R.id.errorLogScroll).visibility = View.VISIBLE
+        v.visibility = View.VISIBLE
+        splash.visibility = View.GONE
+        progress.visibility = View.GONE
+        swipe.isRefreshing = false
+    }
+
     private fun showNetworkError(desc: String?) {
         val v = errorView
         v.findViewById<TextView>(R.id.errorText).text =
             if (isOnline()) (desc ?: "页面加载失败") else getString(R.string.net_error_msg)
+        v.findViewById<View>(R.id.errorLogScroll).visibility = View.GONE
         v.visibility = View.VISIBLE
         splash.visibility = View.GONE
         progress.visibility = View.GONE

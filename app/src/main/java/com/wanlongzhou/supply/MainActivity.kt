@@ -209,14 +209,25 @@ class MainActivity : Activity() {
                 view: WebView,
                 request: WebResourceRequest
             ): WebResourceResponse? {
-                // 业务页一律走网络，不做本地拦截。
-                // 本地 PageCache 仅用于「秒开」，但外壳页(SHELL)装载业务页时如果被拦截返回缓存，
-                // 有可能返回旧/坏页面导致白屏；为根治「有 Logo 但业务页白屏」，这里不拦截，
-                // 让外壳页 100% 拿到最新业务页。PageCache 仍保留供 checkUpdateAsync 后台缓存/秒开。
+                // v1.8.7：恢复 v1.8.3 的「秒开」拦截（用户实测 1.8.3 好用、1.8.4+ 空白）。
+                // 背景：1.8.4 曾因「外壳页被 HIDE_FAB 误隐藏导致白屏」把拦截一并砍掉，
+                // 结果业务页每次启动都要手机现场下载 540KB + 全量拉云数据，弱网下就是转圈→空白。
+                // 真正的白屏根因（HIDE_FAB 误伤外壳页、看门狗误报）已在 1.8.4/1.8.6 分别修掉，
+                // 缓存本身是无辜的（业务页纯静态、按 APP_VERSION 只增不改），恢复拦截：
                 val url = request.url.toString()
                 if (!isBizPage(url)) return null
                 bizUrl = url // 记录真实地址，供热更新/更新检测用
-                return null // 始终走网络（不返回缓存）
+
+                // 有本地缓存 → 直接秒开（后台 checkUpdateAsync 会拉新版，下次启动生效）
+                val cached = PageCache.bytes(this@MainActivity)
+                if (cached != null) {
+                    return WebResourceResponse(
+                        "text/html", "utf-8",
+                        ByteArrayInputStream(cached)
+                    )
+                }
+                // 无缓存（首次/刚清缓存）→ 走网络下载，后台随即写入 PageCache 供下次秒开
+                return null
             }
 
             override fun shouldOverrideUrlLoading(

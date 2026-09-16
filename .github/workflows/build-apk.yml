@@ -30,8 +30,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 安装 Android SDK
-        uses: android-actions/setup-android@v3
+      # v1.8.9：弃用 android-actions/setup-android@v3 —— 它是浮动版本，默认装 packages: tools
+      # platform-tools，而新版预装 cmdline-tools 16.0 已移除旧 'tools' 包，导致
+      # "Failed to find package 'tools'" 退出码 1、整步失败（上游回归，与业务代码无关）。
+      # 改用 runner 自带的 cmdline-tools（/usr/local/lib/android/sdk/cmdline-tools/latest）。
+      - name: 配置 Android SDK（用 runner 预装 cmdline-tools）
+        run: |
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: 安装 Gradle 8.2
         run: |
@@ -42,7 +48,7 @@ jobs:
       - name: 接受 SDK 许可证并安装编译平台
         run: |
           yes | sdkmanager --licenses
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: 生成 Gradle Wrapper
         run: gradle wrapper --gradle-version 8.2 --distribution-type bin --no-daemon

@@ -976,7 +976,7 @@ class MainActivity : Activity() {
     }
 
     companion object {
-        private const val DEFAULT_URL = "https://www.workbuddy.link/p/1n4Jb5OioGpFwab2YHFXTs"
+        private const val DEFAULT_URL = "https://workbuddy.link/p/zeDTUYYl1DxWk8Qd18qY1B"
         private const val PREFS = "wlz_supply"
         private const val KEY_URL = "server_url"
         private const val REQ_FILE = 1001

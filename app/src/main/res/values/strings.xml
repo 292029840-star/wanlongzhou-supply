@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">万龙洲供应链</string>
     <!-- 线上系统地址（真正生效的默认值在 MainActivity.kt 的 DEFAULT_URL） -->
-    <string name="default_url">https://www.workbuddy.link/p/1n4Jb5OioGpFwab2YHFXTs</string>
+    <string name="default_url">https://workbuddy.link/p/zeDTUYYl1DxWk8Qd18qY1B</string>
 
     <!-- 闪屏 -->
     <string name="splash_title">万龙洲供应链申购系统</string>
